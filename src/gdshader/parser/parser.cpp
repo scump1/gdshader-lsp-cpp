@@ -1,0 +1,751 @@
+#include "parser.hpp"
+#include <iostream>
+
+namespace gdshader_lsp {
+
+// -------------------------------------------------------------------------
+// CORE
+// -------------------------------------------------------------------------
+
+Parser::Parser(Lexer& lexer) : lexer(lexer) {
+    advance(); // Load first token
+}
+
+std::unique_ptr<ProgramNode> Parser::parse() {
+    auto program = std::make_unique<ProgramNode>();
+
+    while (current_token.type != TokenType::TOKEN_EOF) {
+        auto node = parseTopLevelDecl();
+        if (node) {
+            program->nodes.push_back(std::move(node));
+        }
+    }
+    return program;
+}
+
+void Parser::advance() {
+    previous_token = current_token;
+    
+    // Skip ERROR tokens from lexer loop if necessary, or just report them
+    while (true) {
+        current_token = lexer.getNextToken();
+        if (current_token.type != TokenType::TOKEN_ERROR) break;
+        
+        reportErrorAt(current_token, "Lexical error: " + current_token.value);
+    }
+}
+
+void Parser::consume(TokenType type, const std::string& message) {
+    if (current_token.type == type) {
+        advance();
+        return;
+    }
+    reportError(message);
+}
+
+bool Parser::match(TokenType type) {
+    if (current_token.type == type) {
+        advance();
+        return true;
+    }
+    return false;
+}
+
+bool Parser::check(TokenType type) {
+    return current_token.type == type;
+}
+
+void Parser::reportError(const std::string& message) {
+    reportErrorAt(current_token, message);
+}
+
+void Parser::reportErrorAt(const Token& token, const std::string& message) {
+    if (panicMode) return; // Suppress cascade errors
+    panicMode = true;
+    
+    diagnostics.push_back({token.line, token.column, message});
+    std::cerr << "[Parser] Error at line " << token.line << ": " << message << std::endl;
+}
+
+void Parser::synchronize() {
+    panicMode = false;
+    while (current_token.type != TokenType::TOKEN_EOF) {
+        if (previous_token.type == TokenType::TOKEN_SEMI) return;
+        
+        switch (current_token.type) {
+            case TokenType::KEYWORD_SHADER_TYPE:
+            case TokenType::KEYWORD_UNIFORM:
+            case TokenType::KEYWORD_VARYING:
+            case TokenType::KEYWORD_CONST:
+            case TokenType::KEYWORD_STRUCT:
+            case TokenType::KEYWORD_VOID:
+            case TokenType::KEYWORD_IF:
+            case TokenType::KEYWORD_FOR:
+            case TokenType::KEYWORD_WHILE:
+            case TokenType::KEYWORD_RETURN:
+                return; // Found a synchronization point
+            default:
+                advance();
+        }
+    }
+}
+
+// -------------------------------------------------------------------------
+// TOP LEVEL
+// -------------------------------------------------------------------------
+
+std::unique_ptr<ASTNode> Parser::parseTopLevelDecl() {
+    try {
+        if (match(TokenType::KEYWORD_SHADER_TYPE)) return parseShaderType();
+        if (match(TokenType::KEYWORD_RENDER_MODE)) return parseRenderMode();
+        if (match(TokenType::KEYWORD_UNIFORM))     return parseUniform();
+        if (match(TokenType::KEYWORD_VARYING))     return parseVarying();
+        if (match(TokenType::KEYWORD_CONST))       return parseConst();
+        if (match(TokenType::KEYWORD_STRUCT))      return parseStruct();
+        
+        // Functions or Globals usually start with a type (void, vec3, etc.)
+        if (isTypeStart()) {
+            return parseTypeIdentifierDecl();
+        }
+
+        reportError("Unexpected token at top level: " + current_token.value);
+        advance();
+        return nullptr;
+
+    } catch (...) {
+        synchronize();
+        return nullptr;
+    }
+}
+
+std::unique_ptr<ASTNode> Parser::parseShaderType() {
+    auto node = std::make_unique<ShaderTypeNode>();
+    node->line = previous_token.line;
+    node->column = previous_token.column;
+
+    if (current_token.type == TokenType::TOKEN_IDENTIFIER) {
+        node->shaderType = current_token.value;
+        advance();
+    } else {
+        reportError("Expected shader type identifier (e.g. spatial)");
+    }
+    consume(TokenType::TOKEN_SEMI, "Expected ';' after shader_type");
+    return node;
+}
+
+std::unique_ptr<ASTNode> Parser::parseRenderMode() {
+    auto node = std::make_unique<RenderModeNode>();
+    node->line = previous_token.line;
+
+    do {
+        if (current_token.type == TokenType::TOKEN_IDENTIFIER) {
+            node->modes.push_back(current_token.value);
+            advance();
+        } else {
+            reportError("Expected render mode identifier");
+        }
+    } while (match(TokenType::TOKEN_COMMA));
+
+    consume(TokenType::TOKEN_SEMI, "Expected ';' after render_mode");
+    return node;
+}
+
+std::unique_ptr<ASTNode> Parser::parseUniform() {
+    auto node = std::make_unique<UniformNode>();
+    node->line = previous_token.line;
+
+    node->type = parseTypeString();
+    
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        node->name = current_token.value;
+        advance();
+    } else {
+        reportError("Expected uniform name");
+    }
+
+    // Hint:  : hint_range(0, 1)
+    if (match(TokenType::TOKEN_COLON)) {
+        // Simple hint parsing: consume ID and optionally parens
+        if (check(TokenType::TOKEN_IDENTIFIER)) {
+            node->hint = current_token.value;
+            advance();
+            // Consume arguments if any: hint(a, b, c)
+            if (match(TokenType::TOKEN_LPAREN)) {
+                node->hint += "(";
+                while (!check(TokenType::TOKEN_RPAREN) && !check(TokenType::TOKEN_EOF)) {
+                    // Just lazily consume token values for the hint string
+                    node->hint += current_token.value;
+                    advance();
+                }
+                consume(TokenType::TOKEN_RPAREN, "Expected ')' after hint arguments");
+                node->hint += ")";
+            }
+        }
+    }
+
+    // Default Value: = 0.5
+    if (match(TokenType::TOKEN_EQUAL)) {
+        node->defaultValue = parseExpression();
+    }
+
+    consume(TokenType::TOKEN_SEMI, "Expected ';' after uniform declaration");
+    return node;
+}
+
+std::unique_ptr<ASTNode> Parser::parseVarying() {
+    auto node = std::make_unique<VaryingNode>();
+    node->line = previous_token.line;
+    
+    node->type = parseTypeString();
+    
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        node->name = current_token.value;
+        advance();
+    } else {
+        reportError("Expected varying name");
+    }
+    consume(TokenType::TOKEN_SEMI, "Expected ';' after varying");
+    return node;
+}
+
+std::unique_ptr<ASTNode> Parser::parseConst() {
+    auto node = std::make_unique<ConstNode>();
+    node->line = previous_token.line;
+    
+    node->type = parseTypeString();
+    
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        node->name = current_token.value;
+        advance();
+    } else {
+        reportError("Expected const name");
+    }
+
+    consume(TokenType::TOKEN_EQUAL, "Const requires an initialization value");
+    node->value = parseExpression();
+
+    consume(TokenType::TOKEN_SEMI, "Expected ';' after const declaration");
+    return node;
+}
+
+std::unique_ptr<ASTNode> Parser::parseStruct() {
+    auto node = std::make_unique<StructNode>();
+    node->line = previous_token.line;
+
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        node->name = current_token.value;
+        advance();
+    } else {
+        reportError("Expected struct name");
+    }
+
+    consume(TokenType::TOKEN_LBRACE, "Expected '{' before struct body");
+
+    while (!check(TokenType::TOKEN_RBRACE) && !check(TokenType::TOKEN_EOF)) {
+        StructNode::Member member;
+        member.type = parseTypeString();
+        if (check(TokenType::TOKEN_IDENTIFIER)) {
+            member.name = current_token.value;
+            advance();
+        }
+        consume(TokenType::TOKEN_SEMI, "Expected ';' after struct member");
+        node->members.push_back(member);
+    }
+    consume(TokenType::TOKEN_RBRACE, "Expected '}' after struct body");
+    consume(TokenType::TOKEN_SEMI, "Expected ';' after struct definition");
+
+    return node;
+}
+
+std::unique_ptr<ASTNode> Parser::parseTypeIdentifierDecl() {
+    // We have consumed nothing yet, but we verified isTypeStart()
+    int line = current_token.line;
+    std::string type = parseTypeString();
+    
+    std::string name;
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        name = current_token.value;
+        advance();
+    } else {
+        reportError("Expected identifier after type");
+        return nullptr;
+    }
+
+    // Look ahead to decide if Function or Variable
+    if (check(TokenType::TOKEN_LPAREN)) {
+        auto funcNode = parseFunction(type, name);
+        funcNode->line = line;
+        return funcNode;
+    } else {
+        // Global Variable
+        auto varNode = std::make_unique<VariableDeclNode>();
+        varNode->line = line;
+        varNode->type = type;
+        varNode->name = name;
+        varNode->isConst = false;
+
+        if (match(TokenType::TOKEN_EQUAL)) {
+            varNode->initializer = parseExpression();
+        }
+        consume(TokenType::TOKEN_SEMI, "Expected ';' after variable declaration");
+        return varNode;
+    }
+}
+
+// -------------------------------------------------------------------------
+// FUNCTIONS
+// -------------------------------------------------------------------------
+
+std::unique_ptr<FunctionNode> Parser::parseFunction(const std::string& type, const std::string& name) {
+    auto node = std::make_unique<FunctionNode>();
+    node->returnType = type;
+    node->name = name;
+
+    consume(TokenType::TOKEN_LPAREN, "Expected '('");
+
+    // Parse Arguments
+    if (!check(TokenType::TOKEN_RPAREN)) {
+        do {
+            FunctionNode::Argument arg;
+            
+            // Check for in/out qualifiers
+            if (match(TokenType::KEYWORD_IN)) arg.qualifier = "in";
+            else if (match(TokenType::KEYWORD_OUT)) arg.qualifier = "out";
+            else if (match(TokenType::KEYWORD_INOUT)) arg.qualifier = "inout";
+            
+            arg.type = parseTypeString();
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                arg.name = current_token.value;
+                advance();
+            }
+            node->arguments.push_back(arg);
+
+        } while (match(TokenType::TOKEN_COMMA));
+    }
+
+    consume(TokenType::TOKEN_RPAREN, "Expected ')'");
+
+    // Block
+    if (check(TokenType::TOKEN_LBRACE)) {
+        node->body = parseBlock();
+    } else {
+        consume(TokenType::TOKEN_SEMI, "Expected body or ';'");
+    }
+
+    return node;
+}
+
+std::unique_ptr<BlockNode> Parser::parseBlock() {
+    auto node = std::make_unique<BlockNode>();
+    node->line = current_token.line;
+    
+    consume(TokenType::TOKEN_LBRACE, "Expected '{'");
+    
+    while (!check(TokenType::TOKEN_RBRACE) && !check(TokenType::TOKEN_EOF)) {
+        node->statements.push_back(parseStatement());
+    }
+    
+    consume(TokenType::TOKEN_RBRACE, "Expected '}'");
+    return node;
+}
+
+// -------------------------------------------------------------------------
+// STATEMENTS
+// -------------------------------------------------------------------------
+
+std::unique_ptr<StatementNode> Parser::parseStatement() {
+    if (match(TokenType::KEYWORD_IF)) return parseIf();
+    if (match(TokenType::KEYWORD_FOR)) return parseFor();
+    if (match(TokenType::KEYWORD_WHILE)) return parseWhile();
+    if (match(TokenType::KEYWORD_RETURN)) return parseReturn();
+    if (match(TokenType::KEYWORD_DISCARD)) {
+        auto node = std::make_unique<DiscardNode>();
+        node->line = previous_token.line;
+        consume(TokenType::TOKEN_SEMI, "Expected ';'");
+        return node;
+    }
+    if (match(TokenType::TOKEN_LBRACE)) {
+        // Nested block
+        // Hack: parseBlock returns BlockNode which inherits StatementNode
+        // but unique_ptr casting requires care. Usually works if inheritance is public.
+        // We'll return it directly (BlockNode is a StatementNode)
+        return parseBlock(); 
+    }
+    
+    // Variable Declaration? "int x = 5;"
+    if (isTypeStart()) {
+        return parseVarDecl();
+    }
+
+    return parseExpressionStatement();
+}
+
+std::unique_ptr<StatementNode> Parser::parseVarDecl() {
+    auto node = std::make_unique<VariableDeclNode>();
+    node->line = current_token.line;
+    node->type = parseTypeString();
+    
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        node->name = current_token.value;
+        advance();
+    } else {
+        reportError("Expected variable name");
+    }
+
+    if (match(TokenType::TOKEN_EQUAL)) {
+        node->initializer = parseExpression();
+    }
+
+    consume(TokenType::TOKEN_SEMI, "Expected ';'");
+    return node;
+}
+
+std::unique_ptr<StatementNode> Parser::parseIf() {
+    auto node = std::make_unique<IfNode>();
+    node->line = previous_token.line;
+
+    consume(TokenType::TOKEN_LPAREN, "Expected '(' after if");
+    node->condition = parseExpression();
+    consume(TokenType::TOKEN_RPAREN, "Expected ')' after condition");
+
+    node->thenBranch = parseStatement();
+    
+    if (match(TokenType::KEYWORD_ELSE)) {
+        node->elseBranch = parseStatement();
+    }
+    return node;
+}
+
+std::unique_ptr<StatementNode> Parser::parseFor() {
+    auto node = std::make_unique<ForNode>();
+    node->line = previous_token.line;
+
+    consume(TokenType::TOKEN_LPAREN, "Expected '(' after for");
+    
+    // Init
+    if (!match(TokenType::TOKEN_SEMI)) {
+        if (isTypeStart()) node->init = parseVarDecl();
+        else node->init = parseExpressionStatement();
+    }
+    // Condition
+    if (!check(TokenType::TOKEN_SEMI)) {
+        node->condition = parseExpression();
+    }
+    consume(TokenType::TOKEN_SEMI, "Expected ';' after for loop condition");
+    // Increment
+    if (!check(TokenType::TOKEN_RPAREN)) {
+        node->increment = parseExpression();
+    }
+    consume(TokenType::TOKEN_RPAREN, "Expected ')' after for clauses");
+
+    node->body = parseStatement();
+    return node;
+}
+
+std::unique_ptr<StatementNode> Parser::parseWhile() {
+    auto node = std::make_unique<WhileNode>();
+    node->line = previous_token.line;
+    
+    consume(TokenType::TOKEN_LPAREN, "Expected '(' after while");
+    node->condition = parseExpression();
+    consume(TokenType::TOKEN_RPAREN, "Expected ')'");
+    
+    node->body = parseStatement();
+    return node;
+}
+
+std::unique_ptr<StatementNode> Parser::parseReturn() {
+    auto node = std::make_unique<ReturnNode>();
+    node->line = previous_token.line;
+
+    if (!check(TokenType::TOKEN_SEMI)) {
+        node->value = parseExpression();
+    }
+    consume(TokenType::TOKEN_SEMI, "Expected ';'");
+    return node;
+}
+
+std::unique_ptr<StatementNode> Parser::parseExpressionStatement() {
+    auto node = std::make_unique<ExpressionStatementNode>();
+    node->line = current_token.line;
+    node->expr = parseExpression();
+    consume(TokenType::TOKEN_SEMI, "Expected ';'");
+    return node;
+}
+
+// -------------------------------------------------------------------------
+// EXPRESSIONS
+// -------------------------------------------------------------------------
+
+std::unique_ptr<ExpressionNode> Parser::parseExpression() {
+    return parseAssignment();
+}
+
+std::unique_ptr<ExpressionNode> Parser::parseAssignment() {
+    auto expr = parseTernary();
+
+    if (match(TokenType::TOKEN_EQUAL) || match(TokenType::TOKEN_PLUS) /* += etc */ ) {
+        // Note: keeping it simple with just = for now, but handling += needs opcode mapping
+        TokenType op = previous_token.type;
+        auto right = parseAssignment();
+        
+        // Wrap in BinaryOp for assignment? Or specific AssignmentNode?
+        // Let's use BinaryOpNode with TOKEN_EQUAL for now
+        auto node = std::make_unique<BinaryOpNode>();
+        node->op = op;
+        node->left = std::move(expr);
+        node->right = std::move(right);
+        return node;
+    }
+
+    return expr;
+}
+
+std::unique_ptr<ExpressionNode> Parser::parseTernary() {
+    auto expr = parseLogicOr();
+    
+    if (match(TokenType::TOKEN_QUESTION)) {
+        auto node = std::make_unique<TernaryNode>();
+        node->condition = std::move(expr);
+        node->trueExpr = parseExpression();
+        consume(TokenType::TOKEN_COLON, "Expected ':' in ternary operator");
+        node->falseExpr = parseTernary();
+        return node;
+    }
+    return expr;
+}
+
+std::unique_ptr<ExpressionNode> Parser::parseLogicOr() {
+    auto expr = parseLogicAnd();
+    while (match(TokenType::TOKEN_OR)) {
+        auto node = std::make_unique<BinaryOpNode>();
+        node->op = TokenType::TOKEN_OR;
+        node->left = std::move(expr);
+        node->right = parseLogicAnd();
+        expr = std::move(node);
+    }
+    return expr;
+}
+
+std::unique_ptr<ExpressionNode> Parser::parseLogicAnd() {
+    auto expr = parseEquality();
+    while (match(TokenType::TOKEN_AND)) {
+        auto node = std::make_unique<BinaryOpNode>();
+        node->op = TokenType::TOKEN_AND;
+        node->left = std::move(expr);
+        node->right = parseEquality();
+        expr = std::move(node);
+    }
+    return expr;
+}
+
+std::unique_ptr<ExpressionNode> Parser::parseEquality() {
+    auto expr = parseComparison();
+    while (match(TokenType::TOKEN_EQ_EQ) || match(TokenType::TOKEN_NOT_EQ)) {
+        auto node = std::make_unique<BinaryOpNode>();
+        node->op = previous_token.type;
+        node->left = std::move(expr);
+        node->right = parseComparison();
+        expr = std::move(node);
+    }
+    return expr;
+}
+
+std::unique_ptr<ExpressionNode> Parser::parseComparison() {
+    auto expr = parseTerm();
+    while (match(TokenType::TOKEN_LESS) || match(TokenType::TOKEN_LESS_EQ) ||
+           match(TokenType::TOKEN_GREATER) || match(TokenType::TOKEN_GREATER_EQ)) {
+        auto node = std::make_unique<BinaryOpNode>();
+        node->op = previous_token.type;
+        node->left = std::move(expr);
+        node->right = parseTerm();
+        expr = std::move(node);
+    }
+    return expr;
+}
+
+std::unique_ptr<ExpressionNode> Parser::parseTerm() {
+    auto expr = parseFactor();
+    while (match(TokenType::TOKEN_PLUS) || match(TokenType::TOKEN_MINUS)) {
+        auto node = std::make_unique<BinaryOpNode>();
+        node->op = previous_token.type;
+        node->left = std::move(expr);
+        node->right = parseFactor();
+        expr = std::move(node);
+    }
+    return expr;
+}
+
+std::unique_ptr<ExpressionNode> Parser::parseFactor() {
+    auto expr = parseUnary();
+    while (match(TokenType::TOKEN_STAR) || match(TokenType::TOKEN_SLASH) || match(TokenType::TOKEN_PERCENT)) {
+        auto node = std::make_unique<BinaryOpNode>();
+        node->op = previous_token.type;
+        node->left = std::move(expr);
+        node->right = parseUnary();
+        expr = std::move(node);
+    }
+    return expr;
+}
+
+std::unique_ptr<ExpressionNode> Parser::parseUnary() {
+    if (match(TokenType::TOKEN_MINUS) || match(TokenType::TOKEN_EXCL)) {
+        auto node = std::make_unique<UnaryOpNode>();
+        node->op = previous_token.type;
+        node->operand = parseUnary();
+        node->isPostfix = false;
+        return node;
+    }
+    return parseCallOrAccess();
+}
+
+std::unique_ptr<ExpressionNode> Parser::parseCallOrAccess() {
+    auto expr = parsePrimary();
+
+    while (true) {
+        // Function Call: ident(...)
+        if (match(TokenType::TOKEN_LPAREN)) {
+            // Convert the expr (IdentifierNode) into a FunctionCallNode or ConstructorNode
+            // For simplicity, we create a specialized node, or check if expr is Identifier.
+            // If expr is not identifier/type, this is invalid syntax usually.
+            
+            auto callNode = std::make_unique<FunctionCallNode>();
+            if (auto id = dynamic_cast<IdentifierNode*>(expr.get())) {
+                callNode->functionName = id->name;
+            } else {
+                // Could be a constructor like vec3(...)
+                // We'll reuse FunctionCallNode for now or ConstructorNode
+                callNode->functionName = "unknown";
+            }
+            callNode->line = expr->line;
+
+            if (!check(TokenType::TOKEN_RPAREN)) {
+                do {
+                    callNode->arguments.push_back(parseExpression());
+                } while (match(TokenType::TOKEN_COMMA));
+            }
+            consume(TokenType::TOKEN_RPAREN, "Expected ')' after arguments");
+            expr = std::move(callNode);
+        }
+        // Member Access: .xyz
+        else if (match(TokenType::TOKEN_DOT)) {
+            auto dotNode = std::make_unique<MemberAccessNode>();
+            dotNode->base = std::move(expr);
+            dotNode->line = previous_token.line;
+            
+            if (check(TokenType::TOKEN_IDENTIFIER)) {
+                dotNode->member = current_token.value;
+                advance();
+            } else {
+                reportError("Expected property name after '.'");
+            }
+            expr = std::move(dotNode);
+        }
+        // Array Access: [0]
+        else if (match(TokenType::TOKEN_LBRACKET)) {
+            auto indexNode = std::make_unique<ArrayAccessNode>();
+            indexNode->base = std::move(expr);
+            indexNode->line = previous_token.line;
+            indexNode->index = parseExpression();
+            consume(TokenType::TOKEN_RBRACKET, "Expected ']'");
+            expr = std::move(indexNode);
+        }
+        else {
+            break;
+        }
+    }
+    return expr;
+}
+
+std::unique_ptr<ExpressionNode> Parser::parsePrimary() {
+    if (match(TokenType::TOKEN_NUMBER)) {
+        auto node = std::make_unique<LiteralNode>();
+        node->type = TokenType::TOKEN_NUMBER;
+        node->value = previous_token.value;
+        node->line = previous_token.line;
+        return node;
+    }
+    if (match(TokenType::TOKEN_STRING)) {
+        auto node = std::make_unique<LiteralNode>();
+        node->type = TokenType::TOKEN_STRING;
+        node->value = previous_token.value;
+        return node;
+    }
+    if (match(TokenType::KEYWORD_TRUE)) {
+        auto node = std::make_unique<LiteralNode>();
+        node->type = TokenType::KEYWORD_TRUE;
+        node->value = "true";
+        return node;
+    }
+    if (match(TokenType::KEYWORD_FALSE)) {
+        auto node = std::make_unique<LiteralNode>();
+        node->type = TokenType::KEYWORD_FALSE;
+        node->value = "false";
+        return node;
+    }
+    if (match(TokenType::TOKEN_IDENTIFIER)) {
+        auto node = std::make_unique<IdentifierNode>();
+        node->name = previous_token.value;
+        node->line = previous_token.line;
+        // Check if it's a type (constructor)?
+        // For AST purposes, IdentifierNode is fine, semantic analysis decides if it's a Type.
+        return node;
+    }
+    // Types (vec3, float) as primaries (constructors)?
+    // Usually constructors start with a Type Keyword.
+    // Let's check isTypeStart()
+    if (isTypeStart()) {
+        auto node = std::make_unique<IdentifierNode>();
+        node->name = parseTypeString(); 
+        // We consumed the keyword in parseTypeString
+        return node;
+    }
+
+    if (match(TokenType::TOKEN_LPAREN)) {
+        auto expr = parseExpression();
+        consume(TokenType::TOKEN_RPAREN, "Expected ')'");
+        return expr;
+    }
+
+    reportError("Expect expression.");
+    return nullptr;
+}
+
+// -------------------------------------------------------------------------
+// UTILS
+// -------------------------------------------------------------------------
+
+std::string Parser::parseTypeString() {
+    std::string type = current_token.value;
+    advance(); // Consume the keyword/identifier
+    return type;
+}
+
+bool Parser::isTypeStart() {
+    // Check keywords that are types
+    switch (current_token.type) {
+        case TokenType::KEYWORD_VOID:
+        case TokenType::KEYWORD_BOOL:
+        case TokenType::KEYWORD_INT:
+        case TokenType::KEYWORD_UINT:
+        case TokenType::KEYWORD_FLOAT:
+        case TokenType::KEYWORD_VEC2:
+        case TokenType::KEYWORD_VEC3:
+        case TokenType::KEYWORD_VEC4:
+        case TokenType::KEYWORD_MAT3:
+        case TokenType::KEYWORD_MAT4:
+        case TokenType::KEYWORD_SAMPLER2D:
+        // ... add all other type keywords
+            return true;
+        case TokenType::TOKEN_IDENTIFIER:
+            // Could be a struct name or custom type
+            // In a real parser we might check symbol table, but for recursive descent 
+            // without semantic info, we might assume ID at start of statement is a type 
+            // if followed by another ID.
+            return true; 
+        default:
+            return false;
+    }
+}
+
+} // namespace gdshader_lsp

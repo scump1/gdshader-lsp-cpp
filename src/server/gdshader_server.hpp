@@ -15,12 +15,15 @@
 #include <lsp/messages.h>
 #include <lsp/types.h>
 
+#include "gdshader/parser/parser.hpp" // parser includes ast.h and lexer.h
+#include "gdshader/semantics/symbol_table.hpp"
+
 namespace gdshader_lsp {
 
 struct Document {
-    // Compiler
-    // Root AST Node
     std::string text;
+    std::unique_ptr<ProgramNode> ast;
+    SymbolTable symbols;
 };
 
 // -------------------------------------------------------------------------
@@ -37,11 +40,12 @@ private:
     lsp::Connection connection;
     lsp::MessageHandler handler;
 
-    void registerHandlers();
+    std::unordered_map<std::string, Document> documents;
 
+    void registerHandlers();
     void publish_diagnostics(const std::string& uri, const std::vector<std::string>& errors);
 
-    std::unordered_map<std::string, Document> documents;
+    void compileAndPublish(const lsp::DocumentUri& uri, const std::string& code);
 
 public:
 
