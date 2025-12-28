@@ -1,0 +1,6 @@
+.sconsign.dblite
+gdshader-lsp
+compile_commands.json
+
+.vscode
+build
