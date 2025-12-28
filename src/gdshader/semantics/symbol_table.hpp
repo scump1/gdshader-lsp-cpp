@@ -30,24 +30,40 @@ struct Symbol {
     std::string doc_string;
 };
 
+struct Scope {
+    Scope* parent = nullptr;
+    std::vector<std::unique_ptr<Scope>> children;
+    std::unordered_map<std::string, Symbol> symbols;
+    
+    // Range this scope covers (0-based)
+    int startLine = 0;
+    int endLine = 0;
+
+    Scope(Scope* p = nullptr) : parent(p) {}
+};
+
 class SymbolTable {
 public:
     SymbolTable();
 
     // Scope Management
-    void pushScope();
-    void popScope();
+    void pushScope(int startLine);
+    void popScope(int endLine);
 
     // CRUD
     bool add(const Symbol& symbol);
     const Symbol* lookup(const std::string& name) const;
+
+    const Scope* findScopeAt(int line) const;
     
     // Helper for Autocomplete: Get all symbols visible in current scope stack
-    std::vector<Symbol> getAllVisibleSymbols() const;
+    std::vector<Symbol> getVisibleSymbols(const Scope* scope) const;
 
 private:
-    // Stack of scopes. Each scope is a map of Name -> Symbol
-    std::vector<std::unordered_map<std::string, Symbol>> scopes;
+   
+    std::unique_ptr<Scope> root;
+    Scope* current;
+
 };
 
 }

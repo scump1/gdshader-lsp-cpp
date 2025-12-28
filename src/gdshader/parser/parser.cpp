@@ -253,7 +253,6 @@ std::unique_ptr<ASTNode> Parser::parseStruct() {
     }
     consume(TokenType::TOKEN_RBRACE, "Expected '}' after struct body");
     consume(TokenType::TOKEN_SEMI, "Expected ';' after struct definition");
-
     return node;
 }
 
@@ -331,11 +330,11 @@ std::unique_ptr<FunctionNode> Parser::parseFunction(const std::string& type, con
     } else {
         consume(TokenType::TOKEN_SEMI, "Expected body or ';'");
     }
-
     return node;
 }
 
-std::unique_ptr<BlockNode> Parser::parseBlock() {
+std::unique_ptr<BlockNode> Parser::parseBlock() 
+{
     auto node = std::make_unique<BlockNode>();
     node->line = current_token.line;
     
@@ -346,6 +345,7 @@ std::unique_ptr<BlockNode> Parser::parseBlock() {
     }
     
     consume(TokenType::TOKEN_RBRACE, "Expected '}'");
+    node->endLine = previous_token.line;
     return node;
 }
 
@@ -439,6 +439,13 @@ std::unique_ptr<StatementNode> Parser::parseFor() {
     consume(TokenType::TOKEN_RPAREN, "Expected ')' after for clauses");
 
     node->body = parseStatement();
+
+    if (node->body) {
+        node->endLine = node->body->endLine;
+    } else {
+        node->endLine = node->line;
+    }
+
     return node;
 }
 
@@ -722,8 +729,8 @@ std::string Parser::parseTypeString() {
 }
 
 bool Parser::isTypeStart() {
-    // Check keywords that are types
     switch (current_token.type) {
+
         case TokenType::KEYWORD_VOID:
         case TokenType::KEYWORD_BOOL:
         case TokenType::KEYWORD_INT:
@@ -732,17 +739,52 @@ bool Parser::isTypeStart() {
         case TokenType::KEYWORD_VEC2:
         case TokenType::KEYWORD_VEC3:
         case TokenType::KEYWORD_VEC4:
+        case TokenType::KEYWORD_IVEC2:
+        case TokenType::KEYWORD_IVEC3:
+        case TokenType::KEYWORD_IVEC4:
+        case TokenType::KEYWORD_UVEC2:
+        case TokenType::KEYWORD_UVEC3:
+        case TokenType::KEYWORD_UVEC4:
+        case TokenType::KEYWORD_BVEC2:
+        case TokenType::KEYWORD_BVEC3:
+        case TokenType::KEYWORD_BVEC4:
+        case TokenType::KEYWORD_MAT2:
         case TokenType::KEYWORD_MAT3:
         case TokenType::KEYWORD_MAT4:
         case TokenType::KEYWORD_SAMPLER2D:
-        // ... add all other type keywords
+        case TokenType::KEYWORD_ISAMPLER2D:
+        case TokenType::KEYWORD_USAMPLER2D:
+        case TokenType::KEYWORD_SAMPLER3D:
+        case TokenType::KEYWORD_SAMPLERCUBE:
+        case TokenType::KEYWORD_SAMPLER2DARRAY:
+        case TokenType::KEYWORD_STRUCT: // struct MyStruct x;
             return true;
-        case TokenType::TOKEN_IDENTIFIER:
-            // Could be a struct name or custom type
-            // In a real parser we might check symbol table, but for recursive descent 
-            // without semantic info, we might assume ID at start of statement is a type 
-            // if followed by another ID.
-            return true; 
+
+        case TokenType::TOKEN_IDENTIFIER: {
+            // Ambiguity: "Type var;" vs "Var.member;"
+            // We need to peek at the NEXT token.
+            
+            Token next = lexer.peekToken(0); // Peek next (offset 0 usually means next in queue?)
+            // Wait, check peekToken implementation.
+            // peekToken(0) -> buffer[0].
+            // If buffer empty, it creates token.
+            
+            if (next.type == TokenType::TOKEN_IDENTIFIER) {
+                // "MyType varName" -> It's a declaration
+                return true;
+            }
+            
+            // "myVar.x" (DOT)
+            // "myVar = 5" (EQUAL)
+            // "myVar;" (SEMI)
+            // "myVar()" (LPAREN - could be Constructor or Func Call)
+            // If LPAREN, it's ambiguous: MyType(1) vs myFunc(1).
+            // But 'MyType(1);' is an expression statement anyway.
+            // 'MyType(1) x;' is NOT valid GLSL/Godot (constructors in decl handled differently).
+            
+            return false;
+        }
+
         default:
             return false;
     }

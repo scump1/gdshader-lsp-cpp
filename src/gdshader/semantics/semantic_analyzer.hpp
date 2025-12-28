@@ -10,6 +10,12 @@
 
 namespace gdshader_lsp {
 
+struct AnalysisResult {
+    SymbolTable symbols;
+    TypeRegistry types;
+    std::vector<Diagnostic> diagnostics;
+};
+
 class SemanticAnalyzer {
 
 private:
@@ -21,7 +27,7 @@ private:
 
     // State
     ShaderType currentShaderType = ShaderType::Spatial; // Default
-    Scope currentProcessorFunction = Scope::Global;
+    ShaderStage currentProcessorFunction = ShaderStage::Global;
 
     void visit(const ASTNode* node);
 
@@ -63,7 +69,7 @@ private:
 
 public:
     // Returns a populated symbol table (moved out) and a list of errors
-    std::pair<SymbolTable, std::vector<Diagnostic>> analyze(const ProgramNode* ast);
+    AnalysisResult analyze(const ProgramNode* ast);
 
 };
 

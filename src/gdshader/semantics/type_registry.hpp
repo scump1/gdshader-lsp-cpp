@@ -21,6 +21,7 @@ struct TypeInfo {
 };
 
 class TypeRegistry {
+
 public:
     TypeRegistry() {
         registerBuiltins();
@@ -57,6 +58,12 @@ public:
         return false;
     }
 
+    const TypeInfo* getTypeInfo(const std::string& name) const {
+        auto it = types.find(name);
+        if (it != types.end()) return &it->second;
+        return nullptr;
+    }
+
 private:
     std::unordered_map<std::string, TypeInfo> types;
 
@@ -82,23 +89,24 @@ private:
 
     void registerBuiltins() {
         // Scalars
-        types["float"] = { "float" };
-        types["int"] = { "int" };
-        types["bool"] = { "bool" };
-        types["void"] = { "void" };
+        types["float"] = { .name = "float", .members = {} };
+        types["int"]   = { .name = "int",   .members = {} };
+        types["bool"]  = { .name = "bool",  .members = {} };
+        types["void"]  = { .name = "void",  .members = {} };
 
-        // Vectors (enable swizzling)
-        auto makeVec = [&](std::string n) { types[n] = {n, {}, true, false, false}; };
+        auto makeVec = [&](std::string n) { 
+            types[n] = { .name = n, .members = {}, .is_vector = true }; 
+        };
         makeVec("vec2"); makeVec("vec3"); makeVec("vec4");
         makeVec("ivec2"); makeVec("ivec3"); makeVec("ivec4");
         makeVec("bvec2"); makeVec("bvec3"); makeVec("bvec4");
 
         // Matrices
-        types["mat3"] = { "mat3", {}, false, true, false };
-        types["mat4"] = { "mat4", {}, false, true, false };
+        types["mat3"] = { .name = "mat3", .members = {}, .is_matrix = true };
+        types["mat4"] = { .name = "mat4", .members = {}, .is_matrix = true };
         
         // Samplers
-        types["sampler2D"] = { "sampler2D" };
+        types["sampler2D"] = { .name = "sampler2D", .members = {} };
     }
 };
 

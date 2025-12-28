@@ -20,7 +20,7 @@ enum class ShaderType {
     Unknown
 };
 
-enum class Scope {
+enum class ShaderStage {
     Global,
     Vertex,
     Fragment,
@@ -265,25 +265,25 @@ static const BuiltinFuncList GLOBAL_FUNCTIONS = {
 
 static const BuiltinList EMPTY_LIST = {};
 
-inline const BuiltinList& get_builtins(ShaderType type, Scope scope) {
+inline const BuiltinList& get_builtins(ShaderType type, ShaderStage scope) {
     if (type == ShaderType::Spatial) {
-        if (scope == Scope::Vertex) return SPATIAL_VERTEX;
-        if (scope == Scope::Fragment) return SPATIAL_FRAGMENT;
-        if (scope == Scope::Light) return SPATIAL_LIGHT;
+        if (scope == ShaderStage::Vertex) return SPATIAL_VERTEX;
+        if (scope == ShaderStage::Fragment) return SPATIAL_FRAGMENT;
+        if (scope == ShaderStage::Light) return SPATIAL_LIGHT;
     } 
     else if (type == ShaderType::CanvasItem) {
-        if (scope == Scope::Vertex) return CANVAS_VERTEX;
-        if (scope == Scope::Fragment) return CANVAS_FRAGMENT;
-        if (scope == Scope::Light) return CANVAS_LIGHT;
+        if (scope == ShaderStage::Vertex) return CANVAS_VERTEX;
+        if (scope == ShaderStage::Fragment) return CANVAS_FRAGMENT;
+        if (scope == ShaderStage::Light) return CANVAS_LIGHT;
     }
     else if (type == ShaderType::Particles) {
-        if (scope == Scope::Start || scope == Scope::Process) return PARTICLES_PROCESS;
+        if (scope == ShaderStage::Start || scope == ShaderStage::Process) return PARTICLES_PROCESS;
     }
     else if (type == ShaderType::Sky) {
-        if (scope == Scope::Sky) return SKY_PROCESS;
+        if (scope == ShaderStage::Sky) return SKY_PROCESS;
     }
     else if (type == ShaderType::Fog) {
-        if (scope == Scope::Fog) return FOG_PROCESS;
+        if (scope == ShaderStage::Fog) return FOG_PROCESS;
     }
     
     return EMPTY_LIST;

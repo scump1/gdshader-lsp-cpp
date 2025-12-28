@@ -3,18 +3,20 @@
 
 namespace gdshader_lsp {
 
-std::pair<SymbolTable, std::vector<Diagnostic>> SemanticAnalyzer::analyze(const ProgramNode* ast) 
+AnalysisResult SemanticAnalyzer::analyze(const ProgramNode* ast) 
 {
     symbols = SymbolTable(); // Clear
     diagnostics.clear();
+    typeRegistry = TypeRegistry();
+
     currentShaderType = ShaderType::Spatial; // Reset default
-    currentProcessorFunction = Scope::Global;
+    currentProcessorFunction = ShaderStage::Global;
 
     if (ast) {
         visitProgram(ast);
     }
     
-    return { std::move(symbols), diagnostics };
+    return { std::move(symbols), std::move(typeRegistry), diagnostics };
 }
 
 // -------------------------------------------------------------------------
@@ -36,18 +38,18 @@ void SemanticAnalyzer::visitUniform(const UniformNode* node) {
 }
 
 void SemanticAnalyzer::visitVarying(const VaryingNode* node) {
-    Symbol s{node->name, node->type, SymbolType::Varying, node->line, node->column};
+    Symbol s{node->name, node->type, SymbolType::Varying, node->line, node->column, ""};
     if (!symbols.add(s)) reportError(node, "Redefinition of varying '" + s.name + "'");
 }
 
 void SemanticAnalyzer::visitConst(const ConstNode* node) {
-    Symbol s{node->name, node->type, SymbolType::Const, node->line, node->column};
+    Symbol s{node->name, node->type, SymbolType::Const, node->line, node->column, ""};
     if (!symbols.add(s)) reportError(node, "Redefinition of const '" + s.name + "'");
     if (node->value) visit(node->value.get());
 }
 
 void SemanticAnalyzer::visitStruct(const StructNode* node) {
-    Symbol s{node->name, node->name, SymbolType::Struct, node->line, node->column};
+    Symbol s{node->name, node->name, SymbolType::Struct, node->line, node->column, ""};
     if (!symbols.add(s)) reportError(node, "Redefinition of struct '" + s.name + "'");
     
     // REGISTER THE TYPE
@@ -59,17 +61,17 @@ void SemanticAnalyzer::visitStruct(const StructNode* node) {
 }
 
 void SemanticAnalyzer::visitFunction(const FunctionNode* node) {
-    Symbol funcSym{node->name, node->returnType, SymbolType::Function, node->line, node->column};
+    Symbol funcSym{node->name, node->returnType, SymbolType::Function, node->line, node->column, ""};
     if (!symbols.add(funcSym)) reportError(node, "Redefinition of function '" + node->name + "'");
 
-    symbols.pushScope();
+    symbols.pushScope(node->line);
     
     // Load built-ins if this is a processor function (vertex, fragment, etc.)
     loadBuiltinsForFunction(node->name);
 
     // Add arguments
     for (const auto& arg : node->arguments) {
-        Symbol argSym{arg.name, arg.type, SymbolType::Variable, node->line, node->column};
+        Symbol argSym{arg.name, arg.type, SymbolType::Variable, node->line, node->column, ""};
         symbols.add(argSym);
     }
 
@@ -80,8 +82,8 @@ void SemanticAnalyzer::visitFunction(const FunctionNode* node) {
         }
     }
     
-    symbols.popScope();
-    currentProcessorFunction = Scope::Global; // Reset
+    int endLine = node->body->statements.empty() ? node->line : node->body->statements.back()->line;
+    symbols.popScope(endLine);
 }
 
 
@@ -129,15 +131,15 @@ void SemanticAnalyzer::visitProgram(const ProgramNode* node) {
 // -------------------------------------------------------------------------
 
 void SemanticAnalyzer::visitBlock(const BlockNode* node) {
-    symbols.pushScope();
+    symbols.pushScope(node->line);
     for (const auto& stmt : node->statements) {
         visit(stmt.get());
     }
-    symbols.popScope();
+    symbols.popScope(node->endLine);
 }
 
 void SemanticAnalyzer::visitVarDecl(const VariableDeclNode* node) {
-    Symbol s{node->name, node->type, SymbolType::Variable, node->line, node->column};
+    Symbol s{node->name, node->type, SymbolType::Variable, node->line, node->column, ""};
     if (!symbols.add(s)) reportError(node, "Redefinition of variable '" + s.name + "'");
     
     if (node->initializer) {
@@ -152,13 +154,14 @@ void SemanticAnalyzer::visitIf(const IfNode* node) {
     if (node->elseBranch) visit(node->elseBranch.get());
 }
 
-void SemanticAnalyzer::visitFor(const ForNode* node) {
-    symbols.pushScope(); // 'for' creates a scope for init variable
+void SemanticAnalyzer::visitFor(const ForNode* node) 
+{
+    symbols.pushScope(node->line); // 'for' creates a scope for init variable
     if (node->init) visit(node->init.get());
     if (node->condition) visit(node->condition.get());
     if (node->increment) visit(node->increment.get());
     if (node->body) visit(node->body.get());
-    symbols.popScope();
+    symbols.popScope(node->endLine);
 }
 
 void SemanticAnalyzer::visitWhile(const WhileNode* node) {
@@ -178,7 +181,8 @@ void SemanticAnalyzer::visitExpressionStatement(const ExpressionStatementNode* n
 // EXPRESSIONS
 // -------------------------------------------------------------------------
 
-void SemanticAnalyzer::visitExpression(const ExpressionNode* node) {
+void SemanticAnalyzer::visitExpression(const ExpressionNode* node) 
+{
     if (auto id = dynamic_cast<const IdentifierNode*>(node)) visitIdentifier(id);
     else if (auto bin = dynamic_cast<const BinaryOpNode*>(node)) visitBinaryOp(bin);
     else if (auto un = dynamic_cast<const UnaryOpNode*>(node)) visitUnaryOp(un);
@@ -293,17 +297,16 @@ void SemanticAnalyzer::visitMemberAccess(const MemberAccessNode* node)
 // HELPERS
 // -------------------------------------------------------------------------
 
-void SemanticAnalyzer::loadBuiltinsForFunction(const std::string& funcName) {
-    Scope scope = Scope::Global;
-    if (funcName == "vertex") scope = Scope::Vertex;
-    else if (funcName == "fragment") scope = Scope::Fragment;
-    else if (funcName == "light") scope = Scope::Light;
-    else if (funcName == "start") scope = Scope::Start;
-    else if (funcName == "process") scope = Scope::Process;
+void SemanticAnalyzer::loadBuiltinsForFunction(const std::string& funcName) 
+{
+    ShaderStage scope = ShaderStage::Global;
+    if (funcName == "vertex") scope = ShaderStage::Vertex;
+    else if (funcName == "fragment") scope = ShaderStage::Fragment;
+    else if (funcName == "light") scope = ShaderStage::Light;
+    else if (funcName == "start") scope = ShaderStage::Start;
+    else if (funcName == "process") scope = ShaderStage::Process;
     
-    currentProcessorFunction = scope;
-
-    if (scope != Scope::Global) {
+    if (scope != ShaderStage::Global) {
         const auto& builtins = get_builtins(currentShaderType, scope);
         for (const auto& b : builtins) {
             // We use line -1 to indicate builtin

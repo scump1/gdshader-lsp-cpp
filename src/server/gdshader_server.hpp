@@ -17,6 +17,7 @@
 
 #include "gdshader/parser/parser.hpp" // parser includes ast.h and lexer.h
 #include "gdshader/semantics/symbol_table.hpp"
+#include "gdshader/semantics/type_registry.hpp"
 
 namespace gdshader_lsp {
 
@@ -24,6 +25,7 @@ struct Document {
     std::string text;
     std::unique_ptr<ProgramNode> ast;
     SymbolTable symbols;
+    TypeRegistry types;
 };
 
 // -------------------------------------------------------------------------
@@ -43,9 +45,13 @@ private:
     std::unordered_map<std::string, Document> documents;
 
     void registerHandlers();
-    void publish_diagnostics(const std::string& uri, const std::vector<std::string>& errors);
-
     void compileAndPublish(const lsp::DocumentUri& uri, const std::string& code);
+
+    // Helper
+
+    std::string getWordAtPosition(const std::string& source, int line, int col);
+    std::string getWordBeforeDot(const std::string& lineText, int dotPos);
+    std::string getLine(const std::string& source, int targetLine);
 
 public:
 

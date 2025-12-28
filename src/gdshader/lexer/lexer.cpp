@@ -182,8 +182,6 @@ Token Lexer::parseIdentifier(int startLine, int startCol) {
 
     auto it = keywords.find(result);
     TokenType type = (it != keywords.end()) ? it->second : TokenType::TOKEN_IDENTIFIER;
-
-    // FIX: Use the passed-in startLine/Col, NOT the current `line`/`column`
     return {type, result, startLine, startCol};
 }
 

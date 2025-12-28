@@ -22,6 +22,8 @@ struct ASTNode {
     // Range for error reporting and highlighting
     int line = 0;
     int column = 0;
+
+    int endLine = 0;
 };
 
 // -------------------------------------------------------------------------
