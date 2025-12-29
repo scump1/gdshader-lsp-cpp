@@ -120,12 +120,20 @@ void GdShaderServer::registerHandlers() {
             lsp::MarkupContent content;
             content.kind = lsp::MarkupKind::Markdown;
             
-            // Format:
-            // ```glsl
-            // vec3 ALBEDO
-            // ```
-            // Base color...
-            std::string docString = "```glsl\n" + sym->typeName + " " + sym->name + "\n```\n";
+            std::string signature = sym->typeName + " " + sym->name;
+
+            if (sym->category == SymbolType::Function || sym->category == SymbolType::Builtin) {
+                signature += "(";
+
+                for (size_t i = 0; i < sym->parameterTypes.size(); ++i) {
+                    if (i > 0) signature += ", ";
+                    signature += sym->parameterTypes[i];
+                }
+                signature += ")";
+            }
+
+            std::string docString = "```glsl\n" + signature + "\n```\n";
+
             if (!sym->doc_string.empty()) {
                 docString += "---\n" + sym->doc_string;
             }
@@ -250,6 +258,50 @@ void GdShaderServer::registerHandlers() {
         }
     );
     
+    handler.add<lsp::requests::TextDocument_Definition>(
+        [this](lsp::requests::TextDocument_Definition::Params&& params) 
+        -> lsp::requests::TextDocument_Definition::Result
+        {
+            std::string uri = std::string(params.textDocument.uri.path());
+            int line = params.position.line;
+            int col = params.position.character;
+
+            if (documents.find(uri) == documents.end()) return nullptr;
+            const auto& doc = documents.at(uri);
+
+            // 1. Find Scope & Identifier (Reuse your existing logic)
+            const Scope* scope = doc.symbols.findScopeAt(line);
+            std::string identifier = getWordAtPosition(doc.text, line, col);
+            if (identifier.empty()) return nullptr;
+
+            // 2. Lookup Symbol
+            const Symbol* sym = nullptr;
+            const Scope* walker = scope;
+            while (walker) {
+                if (walker->symbols.count(identifier)) {
+                    sym = &walker->symbols.at(identifier);
+                    break;
+                }
+                walker = walker->parent;
+            }
+
+            // 3. Return Location
+            // We check line >= 0 to ignore Built-ins (which have line -1)
+            if (sym && sym->line >= 0) {
+                return lsp::Location{
+                    .uri = params.textDocument.uri,
+                    .range = {
+                        .start = { (unsigned)sym->line, (unsigned)sym->column },
+                        // Highlight the whole word length
+                        .end   = { (unsigned)sym->line, (unsigned)sym->column + (unsigned)sym->name.length() }
+                    }
+                };
+            }
+
+            return nullptr;
+        }
+    );
+
     // --- LIFECYCLE: SHUTDOWN/EXIT ---
     handler.add<lsp::requests::Shutdown>([]() { return nullptr; });
     handler.add<lsp::notifications::Exit>([]() { exit(0); });

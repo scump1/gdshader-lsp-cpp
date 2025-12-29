@@ -103,6 +103,24 @@ std::unique_ptr<ASTNode> Parser::parseTopLevelDecl() {
         if (match(TokenType::KEYWORD_CONST))       return parseConst();
         if (match(TokenType::KEYWORD_STRUCT))      return parseStruct();
         
+        if (match(TokenType::TOKEN_PREPROCESSOR)) {
+            // Consume the directive (e.g. "include", "define", "ifdef")
+            if (check(TokenType::TOKEN_IDENTIFIER)) advance(); 
+            
+            // Pattern: #include "string"
+            if (previous_token.value == "#" && check(TokenType::TOKEN_STRING)) {
+                advance(); // consume string
+            }
+            // Pattern: #define NAME value
+            else if (previous_token.value == "#" && current_token.value == "define") {
+                advance(); // define
+                advance(); // NAME
+                parseExpression(); // value
+            }
+            
+            return nullptr; // Return null (no AST node) but don't error
+        }
+
         // Functions or Globals usually start with a type (void, vec3, etc.)
         if (isTypeStart()) {
             return parseTypeIdentifierDecl();
@@ -228,7 +246,8 @@ std::unique_ptr<ASTNode> Parser::parseConst() {
     return node;
 }
 
-std::unique_ptr<ASTNode> Parser::parseStruct() {
+std::unique_ptr<ASTNode> Parser::parseStruct() 
+{
     auto node = std::make_unique<StructNode>();
     node->line = previous_token.line;
 
@@ -247,7 +266,24 @@ std::unique_ptr<ASTNode> Parser::parseStruct() {
         if (check(TokenType::TOKEN_IDENTIFIER)) {
             member.name = current_token.value;
             advance();
+
+            if (match(TokenType::TOKEN_LBRACKET)) {
+                // Parse size (must be const int, but for parsing expression is fine)
+                auto sizeExpr = parseExpression(); 
+                consume(TokenType::TOKEN_RBRACKET, "Expected ']' after array size");
+                
+                // For now, we can denote array types in the type string, e.g., "float[3]"
+                // Or just store "float" and a separate is_array flag.
+                // Simple hack for type checking: Append brackets to type string
+                // Note: Getting the exact size value requires evaluating the expression, 
+                // which is hard in the parser. For now, let's just mark it as an array type.
+                member.type += "[]"; 
+            }
+
+        } else {
+            reportError("Expected struct member name");
         }
+
         consume(TokenType::TOKEN_SEMI, "Expected ';' after struct member");
         node->members.push_back(member);
     }

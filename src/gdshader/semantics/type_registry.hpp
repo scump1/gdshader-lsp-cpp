@@ -15,6 +15,7 @@ struct TypeInfo {
     
     // For structs: map<member_name, type_name>
     std::unordered_map<std::string, std::string> members;
+    std::vector<std::pair<std::string, std::string>> memberOrder;
     
     // Flags
     bool is_vector = false;    // Enables swizzling (xyzw, rgba)
@@ -31,11 +32,16 @@ public:
         registerBuiltins();
     }
 
-    void registerStruct(const std::string& name, const std::unordered_map<std::string, std::string>& members) {
+    void registerStruct(const std::string& name, const std::vector<std::pair<std::string, std::string>>& orderedMembers) {
         TypeInfo info;
         info.name = name;
-        info.members = members;
         info.is_struct = true;
+        
+        for (const auto& pair : orderedMembers) {
+            info.members[pair.first] = pair.second; // Map for random access
+            info.memberOrder.push_back(pair);       // Vector for index access
+        }
+        
         types[name] = info;
     }
 
@@ -131,10 +137,10 @@ private:
 
     void registerBuiltins() {
         // Scalars
-        types["float"] = { .name = "float", .members = {} };
-        types["int"]   = { .name = "int",   .members = {} };
-        types["bool"]  = { .name = "bool",  .members = {} };
-        types["void"]  = { .name = "void",  .members = {} };
+        types["float"] = { .name = "float", .members = {}, .memberOrder = {} };
+        types["int"]   = { .name = "int",   .members = {}, .memberOrder = {} };
+        types["bool"]  = { .name = "bool",  .members = {}, .memberOrder = {} };
+        types["void"]  = { .name = "void",  .members = {}, .memberOrder = {} };
 
         auto makeVec = [&](std::string n) { 
 
@@ -148,7 +154,7 @@ private:
                 vector_len = 4;
             }
 
-            types[n] = { .name = n, .members = {}, .is_vector = true, .vector_length = vector_len }; 
+            types[n] = { .name = n, .members = {}, .memberOrder = {}, .is_vector = true, .vector_length = vector_len }; 
         };
 
         makeVec("vec2"); makeVec("vec3"); makeVec("vec4");
@@ -156,11 +162,11 @@ private:
         makeVec("bvec2"); makeVec("bvec3"); makeVec("bvec4");
 
         // Matrices
-        types["mat3"] = { .name = "mat3", .members = {}, .is_matrix = true };
-        types["mat4"] = { .name = "mat4", .members = {}, .is_matrix = true };
+        types["mat3"] = { .name = "mat3", .members = {}, .memberOrder = {}, .is_matrix = true };
+        types["mat4"] = { .name = "mat4", .members = {}, .memberOrder = {}, .is_matrix = true };
         
         // Samplers
-        types["sampler2D"] = { .name = "sampler2D", .members = {} };
+        types["sampler2D"] = { .name = "sampler2D", .members = {}, .memberOrder = {} };
     }
 };
 

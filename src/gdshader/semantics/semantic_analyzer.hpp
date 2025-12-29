@@ -78,6 +78,8 @@ private:
     bool isVecType(const std::string& type);
     bool isConstantExpression(const ExpressionNode* node);
 
+    const Symbol* getRootSymbol(const ExpressionNode* node, const SymbolTable& symbols);
+
     void reportError(const ASTNode* node, const std::string& msg);
     void loadBuiltinsForFunction(const std::string& funcName);
     std::string resolveType(const ExpressionNode* node);

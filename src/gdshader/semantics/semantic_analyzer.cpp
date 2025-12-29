@@ -90,11 +90,16 @@ void SemanticAnalyzer::visitStruct(const StructNode* node)
     Symbol s{node->name, node->name, {""}, SymbolType::Struct, node->line, node->column, ""};
     if (!symbols.add(s)) reportError(node, "Redefinition of struct '" + s.name + "'");
     
-    // REGISTER THE TYPE
-    std::unordered_map<std::string, std::string> members;
+    std::vector<std::pair<std::string, std::string>> members;
+    
     for(const auto& m : node->members) {
-        members[m.name] = m.type;
+        // Basic check for recursion
+        if (m.type == node->name) {
+            reportError(node, "Struct '" + node->name + "' cannot contain itself.");
+        }
+        members.push_back({m.name, m.type});
     }
+    
     typeRegistry.registerStruct(node->name, members);
 }
 
@@ -435,10 +440,12 @@ void SemanticAnalyzer::visitAssignment(const BinaryOpNode* node)
         visit(node->left.get()); // Standard visit
         lhsType = resolveType(node->left.get());
         
-        // Advanced: If you want to check if the ROOT of the member access 
-        // is a const/uniform (e.g., 'my_uniform.x = 5'), you would need 
-        // to dig down to the base IdentifierNode here. 
-        // For now, we focus on direct identifier assignment.
+        const Symbol* s = getRootSymbol(node->left.get(), symbols);
+        if (s) {
+            if (s->category == SymbolType::Uniform) {
+                reportError(node, "Cannot assign to member of uniform '" + s->name + "'");
+            }
+        }
     } 
     else {
         reportError(node, "Invalid assignment target");
@@ -539,7 +546,32 @@ void SemanticAnalyzer::visitMemberAccess(const MemberAccessNode* node)
 
 void SemanticAnalyzer::validateConstructor(const FunctionCallNode* node, const std::string& typeName) 
 {
-    // 1. Basic Info
+    const TypeInfo* info = typeRegistry.getTypeInfo(typeName);
+    
+    if (info && info->is_struct) {
+        // 1. Check Argument Count
+        if (node->arguments.size() != info->memberOrder.size()) {
+            reportError(node, "Struct constructor '" + typeName + "' expects " + 
+                std::to_string(info->memberOrder.size()) + " arguments, but got " + 
+                std::to_string(node->arguments.size()));
+            return;
+        }
+
+        // 2. Check Argument Types (In Order)
+        for (size_t i = 0; i < node->arguments.size(); ++i) {
+            std::string argType = resolveType(node->arguments[i].get());
+            std::string expectedType = info->memberOrder[i].second;
+
+            if (argType != "unknown" && argType != expectedType) {
+                reportError(node->arguments[i].get(), 
+                    "Argument " + std::to_string(i + 1) + " mismatch: Expected '" + 
+                    expectedType + "' (member '" + info->memberOrder[i].first + 
+                    "'), but found '" + argType + "'");
+            }
+        }
+        return;
+    }
+
     int targetCount = getComponentCount(typeName);
     std::string targetBase = getElementBaseType(typeName);
 
@@ -729,6 +761,20 @@ bool gdshader_lsp::SemanticAnalyzer::isConstantExpression(const ExpressionNode *
     return false;
 }
 
+const Symbol *gdshader_lsp::SemanticAnalyzer::getRootSymbol(const ExpressionNode *node, const SymbolTable &symbols)
+{
+    if (auto id = dynamic_cast<const IdentifierNode*>(node)) {
+        return symbols.lookup(id->name);
+    }
+    if (auto mem = dynamic_cast<const MemberAccessNode*>(node)) {
+        return getRootSymbol(mem->base.get(), symbols);
+    }
+    if (auto idx = dynamic_cast<const ArrayAccessNode*>(node)) {
+        return getRootSymbol(idx->base.get(), symbols);
+    }
+    return nullptr;
+}
+
 void SemanticAnalyzer::loadBuiltinsForFunction(const std::string& funcName) 
 {
     ShaderStage scope = ShaderStage::Global;
@@ -810,7 +856,6 @@ std::string gdshader_lsp::SemanticAnalyzer::resolveType(const ExpressionNode *no
         for(const auto& f : GLOBAL_FUNCTIONS) {
             if(f.name == call->functionName) {
                 
-                // --- NEW: Dynamic Return Type Resolution ---
                 if (f.returnType == "vec_type") {
                     // Infer return type from the first argument
                     // e.g., sin(vec3) -> returns vec3
@@ -819,7 +864,6 @@ std::string gdshader_lsp::SemanticAnalyzer::resolveType(const ExpressionNode *no
                     }
                     return "float"; // Fallback if no args (shouldn't happen for these math funcs)
                 }
-                // -------------------------------------------
                 
                 return f.returnType;
             }
