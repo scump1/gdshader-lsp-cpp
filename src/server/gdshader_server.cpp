@@ -213,10 +213,6 @@ void GdShaderServer::registerHandlers() {
                             items.push_back({ .label = colors[i], .kind = lsp::CompletionItemKind::Field, .detail = "float" });
                             items.push_back({ .label = tex[i],    .kind = lsp::CompletionItemKind::Field, .detail = "float" });
                         }
-                        
-                        // Optional: Add common swizzles like "xy", "rgb" if desired
-                        if (size >= 2) items.push_back({ .label = "uv", .kind = lsp::CompletionItemKind::Field, .detail = "vec2" });
-                        if (size >= 3) items.push_back({ .label = "rgb", .kind = lsp::CompletionItemKind::Field, .detail = "vec3" });
                     }
                 }
                 return lsp::requests::TextDocument_Completion::Result(items);
@@ -233,7 +229,19 @@ void GdShaderServer::registerHandlers() {
                         .label = sym.name,
                         .kind = (sym.category == SymbolType::Function) ? lsp::CompletionItemKind::Function : lsp::CompletionItemKind::Variable,
                         .detail = sym.typeName,
-                        .documentation = sym.doc_string
+                        .documentation = sym.doc_string,
+                        .insertText = sym.name
+                    });
+                }
+
+                auto functions = get_builtin_functions();
+
+                for (const auto& function : functions) {
+                    items.push_back(lsp::CompletionItem{
+                        .label = function.name,
+                        .kind = lsp::CompletionItemKind::Function,
+                        .detail = function.returnType,
+                        .insertText = function.name
                     });
                 }
 
@@ -251,9 +259,6 @@ void gdshader_lsp::GdShaderServer::compileAndPublish(const lsp::DocumentUri& uri
 {
     std::string mapKey = std::string(uri.path());
     Document& doc = documents[mapKey];
-
-    // Debug output
-    // std::cout << "Compiling " << mapKey << "..." << std::endl;
 
     // 1. Run Lexer & Parser
     Lexer lexer(code);
@@ -284,10 +289,11 @@ void gdshader_lsp::GdShaderServer::compileAndPublish(const lsp::DocumentUri& uri
     // 3. Convert Diagnostics
     std::vector<lsp::Diagnostic> lspDiagnostics;
     for (const auto& err : errors) {
+        int line_length = getLine(doc.text, err.line).length();
         lspDiagnostics.push_back(lsp::Diagnostic{
             .range = lsp::Range{
-                .start = lsp::Position{(unsigned)err.line, (unsigned)err.column},
-                .end   = lsp::Position{(unsigned)err.line, (unsigned)err.column + 1}
+                .start = lsp::Position{(unsigned)err.line, (unsigned)0},
+                .end   = lsp::Position{(unsigned)err.line, (unsigned)line_length}
             },
             .message = err.message,
             .severity = lsp::DiagnosticSeverity::Error,
@@ -297,12 +303,8 @@ void gdshader_lsp::GdShaderServer::compileAndPublish(const lsp::DocumentUri& uri
 
     // 4. Send to Editor
     lsp::notifications::TextDocument_PublishDiagnostics::Params params;
-    
-    // CRITICAL FIX:
-    // Use the original URI object from the request. 
-    // This preserves the exact encoding (e.g. spaces vs %20) the client used.
-    params.uri = uri; 
-    
+
+    params.uri = uri;     
     params.diagnostics = lspDiagnostics;
 
     handler.sendNotification<lsp::notifications::TextDocument_PublishDiagnostics>(std::move(params));

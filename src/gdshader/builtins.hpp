@@ -1,3 +1,4 @@
+#pragma once
 #ifndef BUILTINS_HPP
 #define BUILTINS_HPP
 
@@ -45,6 +46,7 @@ struct BuiltinFunction {
     std::string name;
     std::string returnType;
     std::string arguments; // Display string for now (e.g., "float x, float y")
+    std::vector<std::string> argTypes;
     std::string doc;
 };
 
@@ -192,71 +194,71 @@ static const BuiltinList FOG_PROCESS = {
 
 static const BuiltinFuncList GLOBAL_FUNCTIONS = {
     // Trigonometry
-    {"radians", "float", "float degrees", "Converts degrees to radians."},
-    {"degrees", "float", "float radians", "Converts radians to degrees."},
-    {"sin", "float", "float angle", "Sine."},
-    {"cos", "float", "float angle", "Cosine."},
-    {"tan", "float", "float angle", "Tangent."},
-    {"asin", "float", "float x", "Arc-sine."},
-    {"acos", "float", "float x", "Arc-cosine."},
-    {"atan", "float", "float y, float x", "Arc-tangent."},
-    {"sinh", "float", "float x", "Hyperbolic sine."},
-    {"cosh", "float", "float x", "Hyperbolic cosine."},
-    {"tanh", "float", "float x", "Hyperbolic tangent."},
+    {"radians", "float", "float degrees", {"float"}, "Converts degrees to radians."},
+    {"degrees", "float", "float radians", {"float"}, "Converts radians to degrees."},
+    {"sin",  "vec_type", "vec_type x", {"vec_type"}, "Sine."},
+    {"cos",  "vec_type", "vec_type x", {"vec_type"}, "Cosine."},
+    {"tan",  "vec_type", "vec_type x", {"vec_type"}, "Tangent."},
+    {"asin", "vec_type", "vec_type x", {"vec_type"}, "Arc-sine."},
+    {"acos", "vec_type", "vec_type x", {"vec_type"}, "Arc-cosine."},
+    {"atan", "vec_type", "vec_type y, vec_type x", {"vec_type","vec_type"}, "Arc-tangent."},
+    {"sinh", "vec_type", "vec_type x", {"vec_type"}, "Hyperbolic sine."},
+    {"cosh", "vec_type", "vec_type x", {"vec_type"}, "Hyperbolic cosine."},
+    {"tanh", "vec_type", "vec_type x", {"vec_type"}, "Hyperbolic tangent."},
 
     // Exponents and Logarithms
-    {"pow", "float", "float x, float y", "Returns x raised to the power of y."},
-    {"exp", "float", "float x", "Returns the natural exponentiation of x."},
-    {"log", "float", "float x", "Returns the natural logarithm of x."},
-    {"exp2", "float", "float x", "Returns 2 raised to the power of x."},
-    {"log2", "float", "float x", "Returns the base 2 logarithm of x."},
-    {"sqrt", "float", "float x", "Returns the square root of x."},
-    {"inversesqrt", "float", "float x", "Returns the inverse square root of x."},
+    {"pow",  "vec_type", "vec_type x, vec_type y", {"vec_type","vec_type"}, "Power."},
+    {"exp",  "vec_type", "vec_type x", {"vec_type"}, "Base-e exponential."},
+    {"log",  "vec_type", "vec_type x", {"vec_type"}, "Natural logarithm."},
+    {"exp2", "float", "float x", {"float"}, "Returns 2 raised to the power of x."},
+    {"log2", "float", "float x", {"float"}, "Returns the base 2 logarithm of x."},
+    {"sqrt", "vec_type", "vec_type x", {"vec_type"}, "Square root."},
+    {"inversesqrt", "float", "float x", {"float"}, "Returns the inverse square root of x."},
 
     // Common Math
-    {"abs", "float", "float x", "Returns the absolute value of x."},
-    {"sign", "float", "float x", "Returns 1.0 if x > 0, -1.0 if x < 0, or 0.0 if x == 0."},
-    {"floor", "float", "float x", "Returns a value equal to the nearest integer that is less than or equal to x."},
-    {"ceil", "float", "float x", "Returns a value equal to the nearest integer that is greater than or equal to x."},
-    {"round", "float", "float x", "Returns a value equal to the nearest integer to x."},
-    {"roundEven", "float", "float x", "Returns a value equal to the nearest integer to x. Halves round to even."},
-    {"trunc", "float", "float x", "Returns a value equal to the nearest integer to x whose absolute value is not larger than the absolute value of x."},
-    {"fract", "float", "float x", "Returns x - floor(x)."},
-    {"mod", "float", "float x, float y", "Computes the value of x modulo y."},
-    {"modf", "float", "float x, out float i", "Returns the fractional part of x and sets i to the integer part."},
-    {"min", "float", "float a, float b", "Returns the smaller of the two values."},
-    {"max", "float", "float a, float b", "Returns the larger of the two values."},
-    {"clamp", "float", "float x, float minVal, float maxVal", "Constrains a value to lie between two further values."},
-    {"mix", "float", "float x, float y, float a", "Linear interpolate between two values."},
-    {"step", "float", "float edge, float x", "Generate a step function by comparing two values."},
-    {"smoothstep", "float", "float edge0, float edge1, float x", "Hermite interpolation between two values."},
+    {"abs", "float", "float x", {"float"}, "Returns the absolute value of x."},
+    {"sign", "float", "float x", {"float"}, "Returns 1.0 if x > 0, -1.0 if x < 0, or 0.0 if x == 0."},
+    {"floor", "float", "float x", {"float"}, "Returns a value equal to the nearest integer that is less than or equal to x."},
+    {"ceil", "float", "float x", {"float"}, "Returns a value equal to the nearest integer that is greater than or equal to x."},
+    {"round", "float", "float x", {"float"}, "Returns a value equal to the nearest integer to x."},
+    {"roundEven", "float", "float x", {"float"}, "Returns a value equal to the nearest integer to x. Halves round to even."},
+    {"trunc", "float", "float x", {"float"}, "Returns a value equal to the nearest integer to x whose absolute value is not larger than the absolute value of x."},
+    {"fract", "float", "float x", {"float"}, "Returns x - floor(x)."},
+    {"mod", "float", "float x, float y", {"float", "float"}, "Computes the value of x modulo y."},
+    {"modf", "float", "float x, out float i", {"float", "float"}, "Returns the fractional part of x and sets i to the integer part."},
+    {"min", "float", "float a, float b", {"float", "float"}, "Returns the smaller of the two values."},
+    {"max", "float", "float a, float b", {"float", "float"}, "Returns the larger of the two values."},
+    {"clamp", "float", "float x, float minVal, float maxVal", {"float", "float", "float"}, "Constrains a value to lie between two further values."},
+    {"mix", "float", "float x, float y, float a", {"float", "float", "float"}, "Linear interpolate between two values."},
+    {"step", "float", "float edge, float x", {"float", "float"}, "Generate a step function by comparing two values."},
+    {"smoothstep", "float", "float edge0, float edge1, float x", {"float", "float", "float"}, "Hermite interpolation between two values."},
     
     // Geometric
-    {"length", "float", "vec_type x", "Calculates the length of a vector."},
-    {"distance", "float", "vec_type p0, vec_type p1", "Calculates the distance between two points."},
-    {"dot", "float", "vec_type x, vec_type y", "Calculates the dot product of two vectors."},
-    {"cross", "vec3", "vec3 x, vec3 y", "Calculates the cross product of two vectors."},
-    {"normalize", "vec_type", "vec_type x", "Calculates the reflection direction for an incident vector."},
-    {"reflect", "vec3", "vec3 I, vec3 N", "Calculates the reflection direction."},
-    {"refract", "vec3", "vec3 I, vec3 N, float eta", "Calculates the refraction direction."},
-    {"faceforward", "vec3", "vec3 N, vec3 I, vec3 Nref", "Returns a vector pointing in the same direction as another."},
+    {"length", "float", "vec_type x", {"vec_type"}, "Calculates the length of a vector."},
+    {"distance", "float", "vec_type p0, vec_type p1", {"vec_type", "vec_type"}, "Calculates the distance between two points."},
+    {"dot", "float", "vec_type x, vec_type y", {"vec_type", "vec_type"}, "Calculates the dot product of two vectors."},
+    {"cross", "vec3", "vec3 x, vec3 y", {"vec_type", "vec_type"}, "Calculates the cross product of two vectors."},
+    {"normalize", "vec_type", "vec_type x", {"vec_type"}, "Calculates the reflection direction for an incident vector."},
+    {"reflect", "vec3", "vec3 I, vec3 N", {"vec_type", "vec_type"},"Calculates the reflection direction."},
+    {"refract", "vec3", "vec3 I, vec3 N, float eta", {"vec_type", "vec_type", "float"},"Calculates the refraction direction."},
+    {"faceforward", "vec3", "vec3 N, vec3 I, vec3 Nref", {"vec_type", "vec_type", "vec_type"},"Returns a vector pointing in the same direction as another."},
 
     // Matrix
-    {"determinant", "float", "mat_type m", "Returns the determinant of a matrix."},
-    {"inverse", "mat_type", "mat_type m", "Returns the inverse of a matrix."},
-    {"transpose", "mat_type", "mat_type m", "Returns the transpose of a matrix."},
+    {"determinant", "float", "mat_type m", {"mat_type"}, "Returns the determinant of a matrix."},
+    {"inverse", "mat_type", "mat_type m", {"mat_type"}, "Returns the inverse of a matrix."},
+    {"transpose", "mat_type", "mat_type m", {"mat_type"}, "Returns the transpose of a matrix."},
 
     // Texture
-    {"texture", "vec4", "sampler2D sampler, vec2 uv", "Performs a texture lookup."},
-    {"textureProj", "vec4", "sampler2D sampler, vec3 uv", "Performs a texture lookup with projection."},
-    {"textureLod", "vec4", "sampler2D sampler, vec2 uv, float lod", "Performs a texture lookup with explicit level of detail."},
-    {"texelFetch", "vec4", "sampler2D sampler, ivec2 P, int lod", "Performs a lookup of a single texel from a texture."},
-    {"textureSize", "ivec2", "sampler2D sampler, int lod", "Returns the size of the texture."},
+    {"texture", "vec4", "sampler2D sampler, vec2 uv", {"sampler2D", "vec2"}, "Performs a texture lookup."},
+    {"textureProj", "vec4", "sampler2D sampler, vec3 uv", {"sampler2D", "vec3"}, "Performs a texture lookup with projection."},
+    {"textureLod", "vec4", "sampler2D sampler, vec2 uv, float lod", {"sampler2D", "vec2", "float"}, "Performs a texture lookup with explicit level of detail."},
+    {"texelFetch", "vec4", "sampler2D sampler, ivec2 P, int lod", {"sampler2D", "ivec2", "int"}, "Performs a lookup of a single texel from a texture."},
+    {"textureSize", "ivec2", "sampler2D sampler, int lod", {"sampler2D", "int"}, "Returns the size of the texture."},
 
     // Derivatives
-    {"dFdx", "float", "float p", "Returns the partial derivative of p with respect to the window x coordinate."},
-    {"dFdy", "float", "float p", "Returns the partial derivative of p with respect to the window y coordinate."},
-    {"fwidth", "float", "float p", "Returns the sum of the absolute value of derivatives in x and y."},
+    {"dFdx", "float", "float p", {"float"}, "Returns the partial derivative of p with respect to the window x coordinate."},
+    {"dFdy", "float", "float p", {"float"}, "Returns the partial derivative of p with respect to the window y coordinate."},
+    {"fwidth", "float", "float p", {"float"}, "Returns the sum of the absolute value of derivatives in x and y."},
 };
 
 // -------------------------------------------------------------------------
@@ -291,6 +293,24 @@ inline const BuiltinList& get_builtins(ShaderType type, ShaderStage scope) {
 
 inline const BuiltinFuncList& get_builtin_functions() {
     return GLOBAL_FUNCTIONS;
+}
+
+// Helper: Returns 1 for scalar, 2 for vec2, 3 for vec3, etc.
+static inline int getComponentCount(const std::string& type) {
+    if (type.find("vec2") != std::string::npos) return 2;
+    if (type.find("vec3") != std::string::npos) return 3;
+    if (type.find("vec4") != std::string::npos) return 4;
+    return 1; // Scalars (int, float, bool) count as 1
+}
+
+// Helper: Returns "float" for vec3, "int" for ivec3, etc.
+static inline std::string getElementBaseType(const std::string& type) {
+    if (type.substr(0, 1) == "d") return "double"; // if supporting double
+    if (type.substr(0, 1) == "i") return "int";
+    if (type.substr(0, 1) == "u") return "uint";
+    if (type.substr(0, 1) == "b") return "bool";
+    if (type == "int" || type == "uint" || type == "bool" || type == "float") return type;
+    return "float"; // vec3, mat3, etc. default to float
 }
 
 } // namespace gdshader_lsp

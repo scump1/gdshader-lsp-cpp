@@ -217,19 +217,19 @@ Token Lexer::createToken() {
     // or just the '#' so the parser handles the rest.
     if (current == '#') {
         advance();
-        return {TokenType::TOKEN_PREPROCESSOR, "#"};
+        return {TokenType::TOKEN_PREPROCESSOR, "#", startLine, startCol};
     }
 
     // Handle Dot (.) access (e.g. vec.x)
     if (current == '.') {
         advance();
-        return {TokenType::TOKEN_DOT, "."};
+        return {TokenType::TOKEN_DOT, ".", startLine, startCol};
     }
     
     // Handle Modulo (%)
     if (current == '%') {
         advance();
-        return {TokenType::TOKEN_PERCENT, "%"};
+        return {TokenType::TOKEN_PERCENT, "%", startLine, startCol};
     }
 
     if (isdigit(current)) {
@@ -262,7 +262,7 @@ Token Lexer::createToken() {
 
     // Fallback
     advance();
-    return {TokenType::TOKEN_ERROR, std::string(1, current)};
+    return {TokenType::TOKEN_ERROR, std::string(1, current), startLine, startCol};
 }
 
 /**
@@ -289,7 +289,7 @@ Token Lexer::getNextToken() {
  * @param offset 
  * @return Token 
  */
-Token Lexer::peekToken(int offset) {
+Token Lexer::peekToken(u_int offset) {
 
     if (offset < peek_buffer.size()) {
         return peek_buffer[offset];

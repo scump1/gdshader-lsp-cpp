@@ -12,9 +12,9 @@ enum class TokenType {
     TOKEN_EOF,
     TOKEN_ERROR,
     TOKEN_IDENTIFIER,
-    TOKEN_NUMBER,     // 1.0, 42
-    TOKEN_STRING,     // "path/to/texture.png"
-    TOKEN_PREPROCESSOR, // #include, #define
+    TOKEN_NUMBER,     
+    TOKEN_STRING,     
+    TOKEN_PREPROCESSOR,
 
     // -------------------------------------------------------------------------
     // OPERATORS & PUNCTUATION
@@ -34,7 +34,7 @@ enum class TokenType {
     TOKEN_AND,          // &&
     TOKEN_OR,           // ||
     
-    TOKEN_DOT,          // .  <-- NEW (Essential for swizzling: ALBEDO.r)
+    TOKEN_DOT,          // .
     TOKEN_COMMA,        // ,
     TOKEN_COLON,        // :
     TOKEN_SEMI,         // ;

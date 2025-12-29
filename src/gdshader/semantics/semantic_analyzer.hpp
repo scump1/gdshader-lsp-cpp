@@ -28,6 +28,7 @@ private:
     // State
     ShaderType currentShaderType = ShaderType::Spatial; // Default
     ShaderStage currentProcessorFunction = ShaderStage::Global;
+    std::string currentExpectedReturnType = "void";
 
     void visit(const ASTNode* node);
 
@@ -50,6 +51,7 @@ private:
     void visitWhile(const WhileNode* node);
     void visitReturn(const ReturnNode* node);
     void visitExpressionStatement(const ExpressionStatementNode* node);
+    void visitDiscard(const DiscardNode* node);
 
     // Expressions
 
@@ -63,12 +65,23 @@ private:
 
     // Helper
 
+    void validateConstructor(const FunctionCallNode* node, const std::string& typeName);
+    void validateFunctionCall(const FunctionCallNode* node, const std::string& funcName);
+
+    bool isProcessorFunction(const std::string& name);
+
     void reportError(const ASTNode* node, const std::string& msg);
     void loadBuiltinsForFunction(const std::string& funcName);
     std::string resolveType(const ExpressionNode* node);
 
 public:
-    // Returns a populated symbol table (moved out) and a list of errors
+
+    /**
+     * @brief The main function for semantic anlysis. Return an AnalysisResult object containing a symbol table, type registry and diagnostic message array.
+     * 
+     * @param ast 
+     * @return AnalysisResult 
+     */
     AnalysisResult analyze(const ProgramNode* ast);
 
 };

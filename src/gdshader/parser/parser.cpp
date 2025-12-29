@@ -499,6 +499,8 @@ std::unique_ptr<ExpressionNode> Parser::parseAssignment() {
         // Wrap in BinaryOp for assignment? Or specific AssignmentNode?
         // Let's use BinaryOpNode with TOKEN_EQUAL for now
         auto node = std::make_unique<BinaryOpNode>();
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         node->op = op;
         node->left = std::move(expr);
         node->right = std::move(right);
@@ -513,6 +515,8 @@ std::unique_ptr<ExpressionNode> Parser::parseTernary() {
     
     if (match(TokenType::TOKEN_QUESTION)) {
         auto node = std::make_unique<TernaryNode>();
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         node->condition = std::move(expr);
         node->trueExpr = parseExpression();
         consume(TokenType::TOKEN_COLON, "Expected ':' in ternary operator");
@@ -526,6 +530,8 @@ std::unique_ptr<ExpressionNode> Parser::parseLogicOr() {
     auto expr = parseLogicAnd();
     while (match(TokenType::TOKEN_OR)) {
         auto node = std::make_unique<BinaryOpNode>();
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         node->op = TokenType::TOKEN_OR;
         node->left = std::move(expr);
         node->right = parseLogicAnd();
@@ -538,6 +544,8 @@ std::unique_ptr<ExpressionNode> Parser::parseLogicAnd() {
     auto expr = parseEquality();
     while (match(TokenType::TOKEN_AND)) {
         auto node = std::make_unique<BinaryOpNode>();
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         node->op = TokenType::TOKEN_AND;
         node->left = std::move(expr);
         node->right = parseEquality();
@@ -550,6 +558,8 @@ std::unique_ptr<ExpressionNode> Parser::parseEquality() {
     auto expr = parseComparison();
     while (match(TokenType::TOKEN_EQ_EQ) || match(TokenType::TOKEN_NOT_EQ)) {
         auto node = std::make_unique<BinaryOpNode>();
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         node->op = previous_token.type;
         node->left = std::move(expr);
         node->right = parseComparison();
@@ -563,6 +573,8 @@ std::unique_ptr<ExpressionNode> Parser::parseComparison() {
     while (match(TokenType::TOKEN_LESS) || match(TokenType::TOKEN_LESS_EQ) ||
            match(TokenType::TOKEN_GREATER) || match(TokenType::TOKEN_GREATER_EQ)) {
         auto node = std::make_unique<BinaryOpNode>();
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         node->op = previous_token.type;
         node->left = std::move(expr);
         node->right = parseTerm();
@@ -575,7 +587,11 @@ std::unique_ptr<ExpressionNode> Parser::parseTerm() {
     auto expr = parseFactor();
     while (match(TokenType::TOKEN_PLUS) || match(TokenType::TOKEN_MINUS)) {
         auto node = std::make_unique<BinaryOpNode>();
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         node->op = previous_token.type;
+        node->line = previous_token.line; 
+        node->column = previous_token.column;
         node->left = std::move(expr);
         node->right = parseFactor();
         expr = std::move(node);
@@ -587,6 +603,8 @@ std::unique_ptr<ExpressionNode> Parser::parseFactor() {
     auto expr = parseUnary();
     while (match(TokenType::TOKEN_STAR) || match(TokenType::TOKEN_SLASH) || match(TokenType::TOKEN_PERCENT)) {
         auto node = std::make_unique<BinaryOpNode>();
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         node->op = previous_token.type;
         node->left = std::move(expr);
         node->right = parseUnary();
@@ -599,6 +617,8 @@ std::unique_ptr<ExpressionNode> Parser::parseUnary() {
     if (match(TokenType::TOKEN_MINUS) || match(TokenType::TOKEN_EXCL)) {
         auto node = std::make_unique<UnaryOpNode>();
         node->op = previous_token.type;
+        node->line = previous_token.line; 
+        node->column = previous_token.column;
         node->operand = parseUnary();
         node->isPostfix = false;
         return node;
@@ -617,6 +637,12 @@ std::unique_ptr<ExpressionNode> Parser::parseCallOrAccess() {
             // If expr is not identifier/type, this is invalid syntax usually.
             
             auto callNode = std::make_unique<FunctionCallNode>();
+            // The identifier was the *previous* expression, so usually strictly speaking
+            // the location is the start of the identifier. 
+            // Ideally, 'expr' (IdentifierNode) already has the correct line.
+            callNode->line = expr->line; 
+            callNode->column = expr->column;
+            
             if (auto id = dynamic_cast<IdentifierNode*>(expr.get())) {
                 callNode->functionName = id->name;
             } else {
@@ -624,7 +650,6 @@ std::unique_ptr<ExpressionNode> Parser::parseCallOrAccess() {
                 // We'll reuse FunctionCallNode for now or ConstructorNode
                 callNode->functionName = "unknown";
             }
-            callNode->line = expr->line;
 
             if (!check(TokenType::TOKEN_RPAREN)) {
                 do {
@@ -668,6 +693,8 @@ std::unique_ptr<ExpressionNode> Parser::parsePrimary() {
     if (match(TokenType::TOKEN_NUMBER)) {
         auto node = std::make_unique<LiteralNode>();
         node->type = TokenType::TOKEN_NUMBER;
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         node->value = previous_token.value;
         node->line = previous_token.line;
         return node;
@@ -675,18 +702,24 @@ std::unique_ptr<ExpressionNode> Parser::parsePrimary() {
     if (match(TokenType::TOKEN_STRING)) {
         auto node = std::make_unique<LiteralNode>();
         node->type = TokenType::TOKEN_STRING;
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         node->value = previous_token.value;
         return node;
     }
     if (match(TokenType::KEYWORD_TRUE)) {
         auto node = std::make_unique<LiteralNode>();
         node->type = TokenType::KEYWORD_TRUE;
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         node->value = "true";
         return node;
     }
     if (match(TokenType::KEYWORD_FALSE)) {
         auto node = std::make_unique<LiteralNode>();
         node->type = TokenType::KEYWORD_FALSE;
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         node->value = "false";
         return node;
     }
@@ -694,8 +727,7 @@ std::unique_ptr<ExpressionNode> Parser::parsePrimary() {
         auto node = std::make_unique<IdentifierNode>();
         node->name = previous_token.value;
         node->line = previous_token.line;
-        // Check if it's a type (constructor)?
-        // For AST purposes, IdentifierNode is fine, semantic analysis decides if it's a Type.
+        node->column = previous_token.column;
         return node;
     }
     // Types (vec3, float) as primaries (constructors)?
@@ -703,7 +735,9 @@ std::unique_ptr<ExpressionNode> Parser::parsePrimary() {
     // Let's check isTypeStart()
     if (isTypeStart()) {
         auto node = std::make_unique<IdentifierNode>();
-        node->name = parseTypeString(); 
+        node->name = parseTypeString();
+        node->line = previous_token.line;
+        node->column = previous_token.column;
         // We consumed the keyword in parseTypeString
         return node;
     }

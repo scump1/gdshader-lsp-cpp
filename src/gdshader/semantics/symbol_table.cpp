@@ -25,7 +25,8 @@ void SymbolTable::popScope(int endLine) {
     }
 }
 
-bool SymbolTable::add(const Symbol& symbol) {
+bool SymbolTable::add(const Symbol& symbol) 
+{
     if (current->symbols.count(symbol.name)) return false;
     current->symbols[symbol.name] = symbol;
     return true;

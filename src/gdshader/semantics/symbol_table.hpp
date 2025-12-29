@@ -22,6 +22,7 @@ enum class SymbolType {
 struct Symbol {
     std::string name;
     std::string typeName; // e.g., "vec3", "void", "MyStruct"
+    std::vector<std::string> parameterTypes;
     SymbolType category;
     
     // For "Go to Definition"
