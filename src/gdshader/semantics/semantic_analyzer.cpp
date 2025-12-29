@@ -473,14 +473,23 @@ void SemanticAnalyzer::visitAssignment(const BinaryOpNode* node)
         
         std::string s = mem->member;
         if (s.length() <= 4) { // Heuristic: it's likely a swizzle
-            bool used[4] = {false, false, false, false}; // For x,y,z,w indices
-            // You might need a helper to map 'x','r','s' -> 0, etc.
-            // Simple version checking duplicates in string:
-            for(size_t i=0; i<s.length(); ++i) {
-                for(size_t j=i+1; j<s.length(); ++j) {
-                    if (s[i] == s[j]) {
-                        reportError(node, "Invalid Write Mask: Component '" + 
-                        std::string(1, s[i]) + "' is assigned twice.");
+            
+            bool isSwizzleChars = true;
+            const std::string validSet = "xyzwrugbstpq"; // Combined sets
+            for (char c : s) {
+                if (validSet.find(c) == std::string::npos) {
+                    isSwizzleChars = false;
+                    break;
+                }
+            }
+
+            if (isSwizzleChars && s.length() <= 4) {
+                for(size_t i=0; i<s.length(); ++i) {
+                    for(size_t j=i+1; j<s.length(); ++j) {
+                        if (s[i] == s[j]) {
+                            reportError(node, "Invalid Write Mask: Component '" + 
+                            std::string(1, s[i]) + "' is assigned twice.");
+                        }
                     }
                 }
             }
@@ -591,8 +600,10 @@ void SemanticAnalyzer::visitFunctionCall(const FunctionCallNode* node)
         // Improve error message to show what was expected
         std::string argsStr = "";
         for(auto& t : argTypes) argsStr += t->toString() + ", ";
-        if (!argsStr.empty()) argsStr.pop_back(); argsStr.pop_back(); // Remove trailing comma
-        
+        if (!argsStr.empty()) {
+            argsStr.pop_back(); 
+            argsStr.pop_back();
+        } 
         reportError(node, "No matching function for '" + name + "(" + argsStr + ")'");
     }
 }
@@ -622,7 +633,6 @@ void SemanticAnalyzer::visitMemberAccess(const MemberAccessNode* node)
 void SemanticAnalyzer::validateConstructor(const FunctionCallNode* node, const std::string& typeName) 
 {
     TypePtr target = typeRegistry.getType(typeName);
-    int expected = target->componentCount;
     
     if (target->kind == TypeKind::STRUCT) {
         

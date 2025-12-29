@@ -97,23 +97,50 @@ void GdShaderServer::registerHandlers() {
             std::string word = getWordAtPosition(doc.text, line, col);
             if (word.empty()) return hover;
 
-            const Symbol* sym = doc.symbols.lookupAt(word, line);
+            bool isMember = (col > 0 && getWordBeforeDot(doc.text, col) != ""); 
 
-            if (sym) {
-                std::string content = "**" + sym->name + "**\n\n";
-                content += "Type: `" + sym->type->toString() + "`\n";
-                if (!sym->doc_string.empty()) {
-                    content += "\n" + sym->doc_string;
-                }
-                
-                hover.contents = {
-                    lsp::MarkupContent {
-                        .kind = lsp::MarkupKind::Markdown,
-                        .value = content
+            if (isMember) {
+                // 1. Find the base variable (e.g. "my_instance" from "my_instance.test")
+                std::string baseName = getWordBeforeDot(doc.text, col); // You need to implement/expose this helper
+                // 2. Look up base
+                const Symbol* baseSym = doc.symbols.lookupAt(baseName, line);
+                if (baseSym && baseSym->type) {
+                    // 3. Look up member in the base type
+                    TypePtr memberT = doc.types.getMemberType(baseSym->type, word);
+                    if (memberT->kind != TypeKind::UNKNOWN) {
+                        std::string content = "**" + baseSym->name + "**\n\n";
+                        content += "Type: `" + baseSym->type->toString() + "`\n";
+                        if (!baseSym->doc_string.empty()) {
+                            content += "\n" + baseSym->doc_string;
+                        }
+                        
+                        hover.contents = {
+                            lsp::MarkupContent {
+                                .kind = lsp::MarkupKind::Markdown,
+                                .value = content
+                            }
+                        };
                     }
-                };
+                }
+            } else {
+
+                const Symbol* sym = doc.symbols.lookupAt(word, line);
+
+                if (sym) {
+                    std::string content = "**" + sym->name + "**\n\n";
+                    content += "Type: `" + sym->type->toString() + "`\n";
+                    if (!sym->doc_string.empty()) {
+                        content += "\n" + sym->doc_string;
+                    }
+                    
+                    hover.contents = {
+                        lsp::MarkupContent {
+                            .kind = lsp::MarkupKind::Markdown,
+                            .value = content
+                        }
+                    };
+                }
             }
-            
             return hover;
         }
     );
