@@ -7,6 +7,8 @@
 #include <memory>
 #include <optional>
 
+#include "gdshader/semantics/types.hpp"
+
 namespace gdshader_lsp {
 
 enum class SymbolType {
@@ -21,11 +23,12 @@ enum class SymbolType {
 
 struct Symbol {
     std::string name;
-    std::string typeName; // e.g., "vec3", "void", "MyStruct"
-    std::vector<std::string> parameterTypes;
-    SymbolType category;
     
-    // For "Go to Definition"
+    TypePtr type;
+    std::vector<TypePtr> parameterTypes;
+    
+    SymbolType category;
+
     int line;
     int column;
     std::string doc_string;
@@ -34,7 +37,8 @@ struct Symbol {
 struct Scope {
     Scope* parent = nullptr;
     std::vector<std::unique_ptr<Scope>> children;
-    std::unordered_map<std::string, Symbol> symbols;
+    
+    std::unordered_map<std::string, std::vector<Symbol>> symbols;
     
     // Range this scope covers (0-based)
     int startLine = 0;
@@ -51,14 +55,26 @@ public:
     void pushScope(int startLine);
     void popScope(int endLine);
 
-    // CRUD
     bool add(const Symbol& symbol);
+
+    /**
+     * @brief With overloading, this is mainly used for local variable lookup, where we retrieve the first symbol matched.
+     * 
+     * @param name 
+     * @return const Symbol* 
+     */
     const Symbol* lookup(const std::string& name) const;
+    std::vector<const Symbol*> lookupFunctions(const std::string& name) const;
 
     const Scope* findScopeAt(int line) const;
+    const Symbol* lookupAt(const std::string& name, int line) const;
     
-    // Helper for Autocomplete: Get all symbols visible in current scope stack
-    std::vector<Symbol> getVisibleSymbols(const Scope* scope) const;
+    /**
+     * @brief Assembles a vector of all visible symbols relatifve to the current scope. Traverses upwards.
+     * @param scope 
+     * @return std::vector<Symbol> 
+     */
+    std::vector<Symbol> getVisibleSymbolsAt(int line) const;
 
 private:
    

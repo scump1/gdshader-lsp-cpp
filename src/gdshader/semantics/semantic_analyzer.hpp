@@ -30,7 +30,7 @@ private:
     ShaderType currentShaderType = ShaderType::Spatial; // Default
     ShaderStage currentProcessorFunction = ShaderStage::Global;
     
-    std::string currentExpectedReturnType = "void";
+    TypePtr currentExpectedReturnType = std::shared_ptr<Type>();
     bool currentFunctionHasReturn = false;
 
     void visit(const ASTNode* node);
@@ -68,21 +68,24 @@ private:
     void visitFunctionCall(const FunctionCallNode* node);
     void visitMemberAccess(const MemberAccessNode* node);
     void visitAssignment(const BinaryOpNode* node); // Special case of BinaryOp
+    void visitArrayAccess(const ArrayAccessNode* node);
 
     // Helper
 
     void validateConstructor(const FunctionCallNode* node, const std::string& typeName);
-    void validateFunctionCall(const FunctionCallNode* node, const std::string& funcName);
 
     bool isProcessorFunction(const std::string& name);
-    bool isVecType(const std::string& type);
-    bool isConstantExpression(const ExpressionNode* node);
+    bool allPathsReturn(const ASTNode* node);
+
+    TypePtr getBinaryOpResultType(TypePtr l, TypePtr r, TokenType op);
 
     const Symbol* getRootSymbol(const ExpressionNode* node, const SymbolTable& symbols);
 
     void reportError(const ASTNode* node, const std::string& msg);
     void loadBuiltinsForFunction(const std::string& funcName);
-    std::string resolveType(const ExpressionNode* node);
+    TypePtr resolveType(const ExpressionNode* node);
+
+    void registerGlobalFunctions();
 
 public:
 

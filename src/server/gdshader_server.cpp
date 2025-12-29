@@ -86,216 +86,150 @@ void GdShaderServer::registerHandlers() {
     handler.add<lsp::requests::TextDocument_Hover>(
         [this](lsp::requests::TextDocument_Hover::Params&& params) -> lsp::requests::TextDocument_Hover::Result
         {
-            std::string uri = std::string(params.textDocument.uri.path());
-
-            int line = params.position.line;
-            int col = params.position.character; 
-
-            if (documents.find(uri) == documents.end()) return nullptr;
-            const auto& doc = documents.at(uri);
-
-            // 1. Find the Scope
-            const Scope* scope = doc.symbols.findScopeAt(line);
-
-            // 2. We need to find the "Word" under the cursor.
-            // Since we don't have the AST node exactly at this char easily accessible 
-            // without a spatial tree, we can use a simple helper to extract the identifier.
-            std::string identifier = getWordAtPosition(doc.text, line, col);
-            
-            if (identifier.empty()) return nullptr;
-
-            const Symbol* sym = nullptr;
-            const Scope* walker = scope;
-            while (walker) {
-                if (walker->symbols.count(identifier)) {
-                    sym = &walker->symbols.at(identifier);
-                    break;
-                }
-                walker = walker->parent;
-            }
-
-            if (!sym) return nullptr;
-
-            // 4. Construct Response
-            lsp::MarkupContent content;
-            content.kind = lsp::MarkupKind::Markdown;
-            
-            std::string signature = sym->typeName + " " + sym->name;
-
-            if (sym->category == SymbolType::Function || sym->category == SymbolType::Builtin) {
-                signature += "(";
-
-                for (size_t i = 0; i < sym->parameterTypes.size(); ++i) {
-                    if (i > 0) signature += ", ";
-                    signature += sym->parameterTypes[i];
-                }
-                signature += ")";
-            }
-
-            std::string docString = "```glsl\n" + signature + "\n```\n";
-
-            if (!sym->doc_string.empty()) {
-                docString += "---\n" + sym->doc_string;
-            }
-            content.value = docString;
-
             lsp::Hover hover;
-            hover.contents = content;
+            std::string path = std::string(params.textDocument.uri.path());
+            if (documents.find(path) == documents.end()) return hover;
+
+            auto& doc = documents[path];
+            int line = params.position.line;
+            int col = params.position.character;
+
+            std::string word = getWordAtPosition(doc.text, line, col);
+            if (word.empty()) return hover;
+
+            const Symbol* sym = doc.symbols.lookupAt(word, line);
+
+            if (sym) {
+                std::string content = "**" + sym->name + "**\n\n";
+                content += "Type: `" + sym->type->toString() + "`\n";
+                if (!sym->doc_string.empty()) {
+                    content += "\n" + sym->doc_string;
+                }
+                
+                hover.contents = {
+                    lsp::MarkupContent {
+                        .kind = lsp::MarkupKind::Markdown,
+                        .value = content
+                    }
+                };
+            }
             
-            // 2. Return it (implicitly converts to Result/Nullable<Hover>)
             return hover;
         }
     );
 
     // --- FEATURE: COMPLETION ---
-    // Called when the user requests auto-completion (ctrl+space or trigger char).
     handler.add<lsp::requests::TextDocument_Completion>(
-        [this](lsp::requests::TextDocument_Completion::Params&& params) 
-        {
-            // 1. Locate the AST node at params.position.line / params.position.character
-            // 2. Determine Scope (Vertex? Fragment? Light?)
-            
-            std::string uri = std::string(params.textDocument.uri.path());
+        [this](lsp::requests::TextDocument_Completion::Params&& params) -> lsp::requests::TextDocument_Completion::Result
+        {            
+            lsp::CompletionList result;
+            result.isIncomplete = false;
+
+            std::string path = std::string(params.textDocument.uri.path());
+            if (documents.find(path) == documents.end()) return result;
+
+            auto& doc = documents[path];
             int line = params.position.line;
             int col = params.position.character;
+
+            // 1. Get context (Line content)
+            std::string lineText = getLine(doc.text, line);
+            if (col > (int)lineText.length()) col = lineText.length();
             
-            // 1. Get the parsed document
-            if (documents.find(uri) == documents.end()) return lsp::requests::TextDocument_Completion::Result{};
-            const auto& doc = documents[uri];
+            // Check trigger char
+            bool isDotTrigger = false;
+            if (col > 0 && lineText[col-1] == '.') isDotTrigger = true;
 
-            std::string textLine = getLine(doc.text, line);
-            char prevChar = (col > 0 && (size_t)col <= textLine.size()) ? textLine[col - 1] : '\0';
+            // --- CASE A: DOT COMPLETION (myVec.|) ---
+            if (isDotTrigger) {
+                std::string varName = getWordBeforeDot(lineText, col);
+                const Symbol* sym = doc.symbols.lookupAt(varName, line);
 
-            if (prevChar == '.') {
-                // 1. Extract variable name
-                std::string varName = getWordBeforeDot(textLine, col - 1);
-                
-                if (varName.empty()) return lsp::requests::TextDocument_Completion::Result{};
-
-                // 2. Lookup Variable in Symbol Table
-                const Scope* scope = doc.symbols.findScopeAt(line);
-                const Symbol* sym = nullptr;
-                const Scope* walker = scope;
-                
-                // Walk up the scope tree to find the variable
-                while (walker) {
-                    if (walker->symbols.count(varName)) {
-                        sym = &walker->symbols.at(varName);
-                        break;
-                    }
-                    walker = walker->parent;
-                }
-
-                // If variable not found, return empty
-                if (!sym) return lsp::requests::TextDocument_Completion::Result{};
-
-                // 3. Lookup Type Definition in Registry
-                std::vector<lsp::CompletionItem> items;
-                const TypeInfo* typeInfo = doc.types.getTypeInfo(sym->typeName);
-
-                if (typeInfo) {
-                    // CASE A: It's a Struct -> Add Members
-                    if (typeInfo->is_struct) {
-                        for (const auto& member : typeInfo->members) {
-                            items.push_back(lsp::CompletionItem{
-                                .label = member.first, // Member Name
-                                .kind = lsp::CompletionItemKind::Field,
-                                .detail = member.second // Member Type
+                if (sym && sym->type) {
+                    TypePtr t = sym->type;
+                    
+                    // 1. Vector Swizzling (Basic)
+                    if (t->kind == TypeKind::VECTOR) {
+                        std::vector<std::string> swizzles = {"x", "y", "z", "w", "r", "g", "b", "a"};
+                        for(int i=0; i<t->componentCount * 2; ++i) { // Crude limit to valid comps
+                            if (i >= (int)swizzles.size()) break;
+                             result.items.push_back(lsp::CompletionItem{
+                                .label = swizzles[i],
+                                .kind = lsp::CompletionItemKind::Field
                             });
                         }
                     }
-                    // CASE B: It's a Vector -> Add Swizzles
-                    else if (typeInfo->is_vector) {
-                        // Add standard components
-                        const char* coords[] = { "x", "y", "z", "w" };
-                        const char* colors[] = { "r", "g", "b", "a" };
-                        const char* tex[]    = { "s", "t", "p", "q" };
-                        
-                        // Determine size based on type name (vec2, vec3, etc.)
-                        int size = 4; 
-                        if (sym->typeName.find("2") != std::string::npos) size = 2;
-                        else if (sym->typeName.find("3") != std::string::npos) size = 3;
-
-                        for(int i=0; i<size; i++) {
-                            items.push_back({ .label = coords[i], .kind = lsp::CompletionItemKind::Field, .detail = "float" });
-                            items.push_back({ .label = colors[i], .kind = lsp::CompletionItemKind::Field, .detail = "float" });
-                            items.push_back({ .label = tex[i],    .kind = lsp::CompletionItemKind::Field, .detail = "float" });
+                    // 2. Struct Members
+                    else if (t->kind == TypeKind::STRUCT) {
+                        for(const auto& member : t->members) {
+                            result.items.push_back(lsp::CompletionItem{
+                                .label = member.first,
+                                .kind = lsp::CompletionItemKind::Field,
+                                .detail = member.second->toString()
+                            });
                         }
                     }
                 }
-                return lsp::requests::TextDocument_Completion::Result(items);
-
-            } else {
-
-                const Scope* scope = doc.symbols.findScopeAt(line);
-                auto symbols = doc.symbols.getVisibleSymbols(scope);
-
-                std::vector<lsp::CompletionItem> items;
-
-                for(const auto& sym : symbols) {
-                    items.push_back(lsp::CompletionItem{
-                        .label = sym.name,
-                        .kind = (sym.category == SymbolType::Function) ? lsp::CompletionItemKind::Function : lsp::CompletionItemKind::Variable,
-                        .detail = sym.typeName,
-                        .documentation = sym.doc_string,
-                        .insertText = sym.name
-                    });
-                }
-
-                auto functions = get_builtin_functions();
-
-                for (const auto& function : functions) {
-                    items.push_back(lsp::CompletionItem{
-                        .label = function.name,
-                        .kind = lsp::CompletionItemKind::Function,
-                        .detail = function.returnType,
-                        .insertText = function.name
-                    });
-                }
-
-                return lsp::requests::TextDocument_Completion::Result(items);
+                return result;
             }
+
+            // --- CASE B: GLOBAL COMPLETION ---
+            // List all visible variables and functions
+            
+            std::vector<Symbol> visible = doc.symbols.getVisibleSymbolsAt(line);
+            
+            for (const auto& s : visible) {
+                lsp::CompletionItem item;
+                item.label = s.name;
+                
+                if (s.category == SymbolType::Function || s.category == SymbolType::Builtin) {
+                    item.kind = lsp::CompletionItemKind::Function;
+                    item.detail = s.type->toString(); // Return type
+                    item.insertText = s.name + "($0)";
+                    item.insertTextFormat = lsp::InsertTextFormat::Snippet;
+                } 
+                else if (s.category == SymbolType::Struct) {
+                    item.kind = lsp::CompletionItemKind::Struct;
+                }
+                else {
+                    item.kind = lsp::CompletionItemKind::Variable;
+                    item.detail = s.type->toString();
+                }
+
+                result.items.push_back(item);
+            }
+
+            return result;
         }
     );
     
+    // --- FEATURE: DEFINITION ---
     handler.add<lsp::requests::TextDocument_Definition>(
         [this](lsp::requests::TextDocument_Definition::Params&& params) 
         -> lsp::requests::TextDocument_Definition::Result
         {
-            std::string uri = std::string(params.textDocument.uri.path());
+            std::string path = std::string(params.textDocument.uri.path());
+            if (documents.find(path) == documents.end()) return nullptr;
+
+            auto& doc = documents[path];
             int line = params.position.line;
             int col = params.position.character;
 
-            if (documents.find(uri) == documents.end()) return nullptr;
-            const auto& doc = documents.at(uri);
+            std::string word = getWordAtPosition(doc.text, line, col);
+            if (word.empty()) return nullptr;
 
-            // 1. Find Scope & Identifier (Reuse your existing logic)
-            const Scope* scope = doc.symbols.findScopeAt(line);
-            std::string identifier = getWordAtPosition(doc.text, line, col);
-            if (identifier.empty()) return nullptr;
+            const Symbol* sym = doc.symbols.lookupAt(word, line);
 
-            // 2. Lookup Symbol
-            const Symbol* sym = nullptr;
-            const Scope* walker = scope;
-            while (walker) {
-                if (walker->symbols.count(identifier)) {
-                    sym = &walker->symbols.at(identifier);
-                    break;
-                }
-                walker = walker->parent;
-            }
-
-            // 3. Return Location
-            // We check line >= 0 to ignore Built-ins (which have line -1)
+            // If found and it's not a built-in (line -1)
             if (sym && sym->line >= 0) {
-                return lsp::Location{
-                    .uri = params.textDocument.uri,
-                    .range = {
-                        .start = { (unsigned)sym->line, (unsigned)sym->column },
-                        // Highlight the whole word length
-                        .end   = { (unsigned)sym->line, (unsigned)sym->column + (unsigned)sym->name.length() }
-                    }
-                };
+                lsp::Location loc;
+                loc.uri = params.textDocument.uri;
+                
+                // Construct range (highlight the specific line)
+                loc.range.start = lsp::Position{(unsigned)sym->line, (unsigned)sym->column};
+                loc.range.end   = lsp::Position{(unsigned)sym->line, (unsigned)sym->column + (unsigned)sym->name.length()};
+                
+                return loc;
             }
 
             return nullptr;
