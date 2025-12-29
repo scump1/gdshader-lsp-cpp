@@ -26,9 +26,12 @@ private:
     std::vector<Diagnostic> diagnostics;
 
     // State
+    
     ShaderType currentShaderType = ShaderType::Spatial; // Default
     ShaderStage currentProcessorFunction = ShaderStage::Global;
+    
     std::string currentExpectedReturnType = "void";
+    bool currentFunctionHasReturn = false;
 
     void visit(const ASTNode* node);
 
@@ -69,6 +72,7 @@ private:
     void validateFunctionCall(const FunctionCallNode* node, const std::string& funcName);
 
     bool isProcessorFunction(const std::string& name);
+    bool isVecType(const std::string& type);
 
     void reportError(const ASTNode* node, const std::string& msg);
     void loadBuiltinsForFunction(const std::string& funcName);

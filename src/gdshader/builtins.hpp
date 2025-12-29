@@ -237,11 +237,11 @@ static const BuiltinFuncList GLOBAL_FUNCTIONS = {
     {"length", "float", "vec_type x", {"vec_type"}, "Calculates the length of a vector."},
     {"distance", "float", "vec_type p0, vec_type p1", {"vec_type", "vec_type"}, "Calculates the distance between two points."},
     {"dot", "float", "vec_type x, vec_type y", {"vec_type", "vec_type"}, "Calculates the dot product of two vectors."},
-    {"cross", "vec3", "vec3 x, vec3 y", {"vec_type", "vec_type"}, "Calculates the cross product of two vectors."},
+    {"cross", "vec3", "vec3 x, vec3 y", {"vec3", "vec3"}, "Calculates the cross product of two vectors."},
     {"normalize", "vec_type", "vec_type x", {"vec_type"}, "Calculates the reflection direction for an incident vector."},
-    {"reflect", "vec3", "vec3 I, vec3 N", {"vec_type", "vec_type"},"Calculates the reflection direction."},
-    {"refract", "vec3", "vec3 I, vec3 N, float eta", {"vec_type", "vec_type", "float"},"Calculates the refraction direction."},
-    {"faceforward", "vec3", "vec3 N, vec3 I, vec3 Nref", {"vec_type", "vec_type", "vec_type"},"Returns a vector pointing in the same direction as another."},
+    {"reflect", "vec3", "vec3 I, vec3 N", {"vec3", "vec3"},"Calculates the reflection direction."},
+    {"refract", "vec3", "vec3 I, vec3 N, float eta", {"vec3", "vec3", "float"},"Calculates the refraction direction."},
+    {"faceforward", "vec3", "vec3 N, vec3 I, vec3 Nref", {"vec3", "vec3", "vec3"},"Returns a vector pointing in the same direction as another."},
 
     // Matrix
     {"determinant", "float", "mat_type m", {"mat_type"}, "Returns the determinant of a matrix."},

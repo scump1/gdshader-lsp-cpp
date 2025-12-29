@@ -340,8 +340,24 @@ std::unique_ptr<BlockNode> Parser::parseBlock()
     
     consume(TokenType::TOKEN_LBRACE, "Expected '{'");
     
-    while (!check(TokenType::TOKEN_RBRACE) && !check(TokenType::TOKEN_EOF)) {
-        node->statements.push_back(parseStatement());
+    while (!check(TokenType::TOKEN_RBRACE) && !check(TokenType::TOKEN_EOF)) 
+    {
+        Token startToken = current_token; // Snapshot current state
+        
+        auto stmt = parseStatement();
+        
+        if (stmt) {
+            node->statements.push_back(std::move(stmt));
+        }
+
+        // Force advance to prevent infinite loop.
+        if (current_token.line == startToken.line && 
+            current_token.column == startToken.column && 
+            current_token.type != TokenType::TOKEN_EOF) {
+            
+            reportError("Parser stuck on '" + current_token.value + "'. Skipping.");
+            advance(); 
+        }
     }
     
     consume(TokenType::TOKEN_RBRACE, "Expected '}'");
@@ -472,10 +488,20 @@ std::unique_ptr<StatementNode> Parser::parseReturn() {
     return node;
 }
 
-std::unique_ptr<StatementNode> Parser::parseExpressionStatement() {
+std::unique_ptr<StatementNode> Parser::parseExpressionStatement() 
+{
     auto node = std::make_unique<ExpressionStatementNode>();
     node->line = current_token.line;
     node->expr = parseExpression();
+
+    if (!node->expr) {
+        // If we have a semicolon, consume it and return a "empty" statement (valid-ish)
+        if (match(TokenType::TOKEN_SEMI)) {
+            return node; 
+        }
+        return nullptr; 
+    }
+
     consume(TokenType::TOKEN_SEMI, "Expected ';'");
     return node;
 }
@@ -626,8 +652,10 @@ std::unique_ptr<ExpressionNode> Parser::parseUnary() {
     return parseCallOrAccess();
 }
 
-std::unique_ptr<ExpressionNode> Parser::parseCallOrAccess() {
+std::unique_ptr<ExpressionNode> Parser::parseCallOrAccess() 
+{
     auto expr = parsePrimary();
+    if (!expr) return nullptr;
 
     while (true) {
         // Function Call: ident(...)

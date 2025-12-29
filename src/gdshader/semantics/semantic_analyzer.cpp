@@ -119,6 +119,19 @@ void SemanticAnalyzer::visitFunction(const FunctionNode* node)
     if (!symbols.add(funcSym)) reportError(node, "Redefinition of function '" + node->name + "'");
     symbols.pushScope(node->line);
 
+    ShaderStage previousStage = currentProcessorFunction;
+    bool previousReturnFlag = currentFunctionHasReturn;
+
+    if (node->name == "vertex") currentProcessorFunction = ShaderStage::Vertex;
+    else if (node->name == "fragment") currentProcessorFunction = ShaderStage::Fragment;
+    else if (node->name == "light") currentProcessorFunction = ShaderStage::Light;
+    else currentProcessorFunction = ShaderStage::Global;
+
+    currentFunctionHasReturn = false;
+
+    // Load built-ins if this is a processor function (vertex, fragment, etc.)
+    loadBuiltinsForFunction(node->name);
+
     if (isProcessorFunction(node->name)) {
         if (node->returnType != "void") {
             reportError(node, "Processor function '" + node->name + "' must return 'void'.");
@@ -127,13 +140,7 @@ void SemanticAnalyzer::visitFunction(const FunctionNode* node)
             reportError(node, "Processor function '" + node->name + "' must not have arguments.");
         }
     }
-    
-    std::string previousReturnType = currentExpectedReturnType;
-    currentExpectedReturnType = node->returnType;
-
-    // Load built-ins if this is a processor function (vertex, fragment, etc.)
-    loadBuiltinsForFunction(node->name);
-
+ 
     // Add arguments
     for (const auto& arg : node->arguments) {
         Symbol argSym{arg.name, arg.type, {arg.type}, SymbolType::Variable, node->line, node->column, ""};
@@ -147,9 +154,25 @@ void SemanticAnalyzer::visitFunction(const FunctionNode* node)
         }
     }
 
-    currentExpectedReturnType = previousReturnType;
+    if (node->returnType != "void" && !currentFunctionHasReturn) {
+        // This is a simple check. It doesn't handle "if/else" branches perfectly,
+        // but it catches functions that have ZERO return statements (like your test case).
+        reportError(node, "Function '" + node->name + "' must return a value of type '" + node->returnType + "'");
+    }
+       
+    currentProcessorFunction = previousStage;
+    currentFunctionHasReturn = previousReturnFlag;
     
-    int endLine = node->body->statements.empty() ? node->line : node->body->statements.back()->line;
+    int endLine = node->line; // Default to function start line
+    
+    if (node->body) {
+        if (!node->body->statements.empty()) {
+            endLine = node->body->statements.back()->line;
+        } else {
+            endLine = node->body->endLine;
+        }
+    }
+
     symbols.popScope(endLine);
 }
 
@@ -250,6 +273,7 @@ void SemanticAnalyzer::visitWhile(const WhileNode* node) {
 void SemanticAnalyzer::visitReturn(const ReturnNode* node) 
 {
     std::string actualType = "void";
+    currentFunctionHasReturn = true;
     
     if (node->value) {
         visit(node->value.get());
@@ -340,36 +364,63 @@ void SemanticAnalyzer::visitBinaryOp(const BinaryOpNode* node)
 
 void SemanticAnalyzer::visitAssignment(const BinaryOpNode* node) 
 {
-    // 1. Check RHS
     if (node->right) visit(node->right.get());
-    std::string lhsType = "unknown";
 
+    std::string lhsType = "unknown";
+    const Symbol* s = nullptr; // We need to track the symbol for permission checks
+
+    // 2. Resolve LHS
     if (auto id = dynamic_cast<const IdentifierNode*>(node->left.get())) {
-        const Symbol* s = symbols.lookup(id->name);
+        s = symbols.lookup(id->name);
         if (s) {
             lhsType = s->typeName;
-            // Const/Uniform checks
-            if (s->category == SymbolType::Const) {
-                reportError(id, "Cannot assign to constant '" + id->name + "'");
-            } else if (s->category == SymbolType::Uniform) {
-                reportError(id, "Cannot assign to uniform '" + id->name + "'");
-            }
         } else {
              reportError(id, "Undefined identifier '" + id->name + "'");
              return;
         }
-    } else if (dynamic_cast<const MemberAccessNode*>(node->left.get())) {
-        visit(node->left.get());
+    } 
+    else if (dynamic_cast<const MemberAccessNode*>(node->left.get())) {
+        visit(node->left.get()); // Standard visit
         lhsType = resolveType(node->left.get());
-    } else {
+        
+        // Advanced: If you want to check if the ROOT of the member access 
+        // is a const/uniform (e.g., 'my_uniform.x = 5'), you would need 
+        // to dig down to the base IdentifierNode here. 
+        // For now, we focus on direct identifier assignment.
+    } 
+    else {
         reportError(node, "Invalid assignment target");
         return;
     }
 
-    // 3. Resolve RHS
+    // 3. Permission Checks (Const, Uniform, Varying)
+    if (s) {
+        if (s->category == SymbolType::Const) {
+            reportError(node->left.get(), "Cannot assign to constant '" + s->name + "'");
+        } 
+        else if (s->category == SymbolType::Uniform) {
+            reportError(node->left.get(), "Cannot assign to uniform '" + s->name + "'");
+        }
+        else if (s->category == SymbolType::Varying) {
+            // --- MISSING LOGIC ADDED HERE ---
+            
+            // Rule 1: No varyings in light() [cite: 23]
+            if (currentProcessorFunction == ShaderStage::Light) {
+                reportError(node->left.get(), "Varying '" + s->name + "' cannot be assigned in the light processor.");
+            }
+            // Rule 2: Varyings only in main processors (Vertex/Fragment)
+            // This catches assignments in custom functions like 'custom_writer()'
+            else if (currentProcessorFunction != ShaderStage::Vertex && 
+                     currentProcessorFunction != ShaderStage::Fragment) {
+                reportError(node->left.get(), "Varying '" + s->name + "' can only be assigned in vertex() or fragment() functions.");
+            }
+        }
+    }
+
+    // 4. Resolve RHS Type
     std::string rhsType = resolveType(node->right.get());
 
-    // 4. Compare
+    // 5. Compare Types
     if (lhsType != "unknown" && rhsType != "unknown" && lhsType != rhsType) {
         reportError(node, 
             "Type mismatch: Cannot assign value of type '" + rhsType +
@@ -547,16 +598,32 @@ void gdshader_lsp::SemanticAnalyzer::validateFunctionCall(const FunctionCallNode
     }
 
     // 3. Validate Argument Types
+    std::string deducedVecType = "";
+
     for (size_t i = 0; i < expectedTypes.size(); ++i) {
         std::string actual = resolveType(node->arguments[i].get());
         std::string expected = expectedTypes[i];
 
-        // Handle Generics for Builtins (e.g. dot(vec3, vec3))
-        if (isBuiltin && (expected == "genType" || expected == "vec_type")) {
-            // For generics, we usually just ensure it's not void or unknown.
-            // A smarter check ensures all "genTypes" in the same call match (e.g. dot(vec3, vec3) vs dot(vec3, float))
-            if (actual == "void") {
-                 reportError(node, "Argument " + std::to_string(i+1) + " cannot be void.");
+        // Generic "vec_type" Logic ---
+        if (isBuiltin && expected == "vec_type") {
+            
+            // A. Must be a valid vector or scalar
+            if (!isVecType(actual) && actual != "unknown") {
+                reportError(node, "Argument " + std::to_string(i + 1) + 
+                    " must be float or vector, but found '" + actual + "'");
+                continue;
+            }
+
+            // B. Consistency Check
+            // If this is the first vec_type we've seen, lock it in.
+            // If we've seen one before, this argument MUST match it.
+            // (e.g. pow(vec3, vec2) is invalid, must be pow(vec3, vec3))
+            if (deducedVecType.empty()) {
+                deducedVecType = actual;
+            } else if (actual != "unknown" && actual != deducedVecType) {
+                reportError(node, "Argument " + std::to_string(i + 1) + 
+                    " type mismatch: Expected '" + deducedVecType + 
+                    "' (to match previous argument) but found '" + actual + "'");
             }
             continue; 
         }
@@ -572,6 +639,12 @@ bool gdshader_lsp::SemanticAnalyzer::isProcessorFunction(const std::string &name
 {
     return name == "vertex" || name == "fragment" || name == "light" || 
            name == "start" || name == "process" || name == "sky" || name == "fog";
+}
+
+bool gdshader_lsp::SemanticAnalyzer::isVecType(const std::string &type)
+{
+    return type == "float" || 
+           type == "vec2" || type == "vec3" || type == "vec4";
 }
 
 void SemanticAnalyzer::loadBuiltinsForFunction(const std::string& funcName) 
@@ -650,10 +723,26 @@ std::string gdshader_lsp::SemanticAnalyzer::resolveType(const ExpressionNode *no
         if (const Symbol* s = symbols.lookup(call->functionName)) {
             return s->typeName;
         }
+
         // Is it a Builtin Function? (Check GLOBAL_FUNCTIONS list)
         for(const auto& f : GLOBAL_FUNCTIONS) {
-            if(f.name == call->functionName) return f.returnType;
+            if(f.name == call->functionName) {
+                
+                // --- NEW: Dynamic Return Type Resolution ---
+                if (f.returnType == "vec_type") {
+                    // Infer return type from the first argument
+                    // e.g., sin(vec3) -> returns vec3
+                    if (!call->arguments.empty()) {
+                        return resolveType(call->arguments[0].get());
+                    }
+                    return "float"; // Fallback if no args (shouldn't happen for these math funcs)
+                }
+                // -------------------------------------------
+                
+                return f.returnType;
+            }
         }
+
         // Is it a Constructor? (vec3(...))
         if(typeRegistry.hasType(call->functionName)) {
             return call->functionName;
