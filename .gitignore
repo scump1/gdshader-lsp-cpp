@@ -2,5 +2,8 @@
 gdshader-lsp
 compile_commands.json
 
+*.o
+
 .vscode
 build
+bin

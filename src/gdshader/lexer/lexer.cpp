@@ -301,7 +301,7 @@ Token Lexer::getNextToken() {
  * @param offset 
  * @return Token 
  */
-Token Lexer::peekToken(u_int offset) {
+Token Lexer::peekToken(unsigned int offset) {
 
     if (offset < peek_buffer.size()) {
         return peek_buffer[offset];

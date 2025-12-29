@@ -1,43 +1,81 @@
 import os
 
-env = Environment(ENV=os.environ)
+vars = Variables()
+vars.Add('platform', 'Target platform to build for (linux, windows, macos)', 'linux')
+vars.Add('target', 'Build target (debug, release)', 'debug')
+
+env = Environment(variables=vars, ENV=os.environ)
+target_platform = env['platform']
+build_target = env['target']
+
+print(f"Building for platform: {target_platform} ({build_target})")
 
 # -------------------------------------------------------------------------
 # COMPILER CONFIGURATION
 # -------------------------------------------------------------------------
-env.Append(CXXFLAGS=['-std=c++20', '-Wall', '-Wextra', '-O2'])
+env.Append(CXXFLAGS=['-std=c++20', '-Wall', '-Wextra'])
+
+if build_target == 'release':
+    env.Append(CXXFLAGS=['-O2'])
+else:
+    env.Append(CXXFLAGS=['-g', '-O0'])
+
+# Platform Specific Settings
+if target_platform == 'windows':
+    # Requires: sudo apt install mingw-w64
+    env.Replace(CXX='x86_64-w64-mingw32-g++')
+    env.Replace(AR='x86_64-w64-mingw32-gcc-ar')
+    env.Replace(RANLIB='x86_64-w64-mingw32-gcc-ranlib')
+    
+    env['PROGSUFFIX'] = '.exe'
+    
+    # Windows Sockets and static linking to avoid dependency hell
+    env.Append(LIBS=['ws2_32', 'shlwapi']) 
+    env.Append(LINKFLAGS=['-static', '-static-libgcc', '-static-libstdc++'])
+
+elif target_platform == 'macos':
+    # Requires: osxcross (https://github.com/tpoechtrager/osxcross)
+    
+    env.Replace(CXX='o64-clang++')
+    env.Replace(AR='x86_64-apple-darwin20.4-ar') # Adjust version as needed
+
+elif target_platform == 'linux':
+    # Default GCC/Clang on host
+    env.Append(LIBS=['pthread'])
 
 # -------------------------------------------------------------------------
-# INCLUDE PATHS
+# DEPENDENCIES (LSP LIBRARY)
 # -------------------------------------------------------------------------
+# NOTE: You must have compiled the 'lsp' library for the target platform as well!
+# We assume you have a folder structure like: extern/lsp-framework/build/linux, /windows, etc.
+# If you only have one flat 'build' folder, you will need to recompile the lib every time you switch platform.
+
+lsp_lib_path = os.path.join('extern', 'lsp-framework', 'build')
+# Optional: Try to find a platform specific subdir if you organize it that way
+if os.path.exists(os.path.join(lsp_lib_path, target_platform)):
+    lsp_lib_path = os.path.join(lsp_lib_path, target_platform)
+
 env.Append(CPPPATH=[
     'src',
     'extern/lsp-framework',          
-    'extern/lsp-framework/build',   
+    lsp_lib_path,   
 ])
 
-# -------------------------------------------------------------------------
-# LIBRARIES
-# -------------------------------------------------------------------------
-env.Append(LIBPATH=['extern/lsp-framework/build']) 
+env.Append(LIBPATH=[lsp_lib_path]) 
 env.Append(LIBS=['lsp'])
-
-if env['PLATFORM'] == 'posix':
-    env.Append(LIBS=['pthread'])
 
 # -------------------------------------------------------------------------
 # BUILD DIRECTORY SETUP
 # -------------------------------------------------------------------------
-# This magic line maps 'src' to 'build'.
-# duplicate=0: Compiles from 'src' but writes .o files to 'build', 
-# without copying the actual .cpp files.
-env.VariantDir('build', 'src', duplicate=0)
+build_dir = os.path.join('build', target_platform)
+env.VariantDir(build_dir, 'src', duplicate=0)
 
 # -------------------------------------------------------------------------
 # COMPILATION DATABASE
 # -------------------------------------------------------------------------
-env.Tool('compilation_db')
-env.CompilationDatabase('compile_commands.json')
+if target_platform == 'linux':
+    env.Tool('compilation_db')
+    env.CompilationDatabase('compile_commands.json')
 
 # -------------------------------------------------------------------------
 # SOURCE DISCOVERY
@@ -52,10 +90,12 @@ for root, dirs, files in os.walk('src'):
             
             # Tell SCons to compile the 'build' version of this file
             # (e.g., "build/server/gdshader_server.cpp")
-            sources.append(os.path.join('build', rel_path))
+            sources.append(os.path.join('src', rel_path))
 
 # -------------------------------------------------------------------------
 # BUILD TARGET
 # -------------------------------------------------------------------------
 # Output the executable inside 'build/'
-env.Program(target='build/gdshader-lsp', source=sources)
+output_bin = os.path.join('bin', target_platform, 'gdshader-lsp')
+
+env.Program(target=output_bin, source=sources)

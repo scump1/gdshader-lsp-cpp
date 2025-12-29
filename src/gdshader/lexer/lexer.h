@@ -23,7 +23,7 @@ public:
      * 
      * @param offset : Default value 1. An offset of 1 means the next available token.
      */
-    Token peekToken(u_int offset = 0);
+    Token peekToken(unsigned int offset = 0);
 
     std::string source;
     size_t current_pos;
