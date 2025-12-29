@@ -12,7 +12,7 @@ Unlike basic syntax highlighters, this LSP understands the *meaning* of your cod
 * **Validation**:
     * **Swizzling**: Ensures components exist (`vec2.z` → error) and sets aren't mixed (`.xg` → error).
     * **Structs**: Validates member access and constructor arguments (order & type).
-    * **Constructors**: Enforces strict GLSL/Godot constructor rules (e.g., `vec3(1.0, 2.0)` ✅ vs `vec3(1, 2)` ❌).
+    * **Constructors**: Enforces strict GLSL/Godot constructor rules (e.g., `vec3(1.0, 2.0)` vs `vec3(1, 2)`).
     * **Functions**: Checks argument counts and types against signatures for both **Built-ins** (`pow`, `texture`) and **User-defined** functions.
 * **Godot-Specific Rules**:
     * Validates processor signatures (`void vertex()`, `void fragment()`).
@@ -20,8 +20,7 @@ Unlike basic syntax highlighters, this LSP understands the *meaning* of your cod
     * Restricts `varying` assignments (Vertex/Fragment only, never in Light processor).
     * Validates Uniform Hints (e.g., checks if `hint_range` is used on a `float/int`).
 
-### ⚡ LSP Capabilities
-* **Diagnostics**: Real-time error reporting with squiggly underlines.
+### LSP Capabilities
 * **Auto-Completion**:
     * Smart suggestions for variables in scope.
     * Struct members and Vector swizzling (e.g., typing `my_vec.` suggests `xy`, `rgb`).
@@ -31,10 +30,6 @@ Unlike basic syntax highlighters, this LSP understands the *meaning* of your cod
     * Shows types and function signatures (e.g., `vec3 mix(vec3, vec3, float)`).
     * Displays documentation for built-in Godot functions.
     * Shows values of `const` variables.
-
-### Native Syntax Highlighting (Godot Client)
-* Includes a GDExtension-based syntax highlighter.
-* **Adaptive Theming**: Automatically pulls colors from your **Godot Editor Settings**, ensuring your shaders look consistent with your current theme (Light/Dark/Custom).
 
 ---
 
@@ -50,8 +45,4 @@ This project uses **SCons** as its build system.
 To build the standalone LSP executable:
 
 ```bash
-# Debug build
-scons platform=<platform> target=template_debug
-
-# Release build
-scons platform=<platform> target=template_release
+scons platform=<platform>
