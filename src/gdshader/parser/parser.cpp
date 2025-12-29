@@ -369,11 +369,17 @@ std::unique_ptr<BlockNode> Parser::parseBlock()
 // STATEMENTS
 // -------------------------------------------------------------------------
 
-std::unique_ptr<StatementNode> Parser::parseStatement() {
+std::unique_ptr<StatementNode> Parser::parseStatement() 
+{
     if (match(TokenType::KEYWORD_IF)) return parseIf();
     if (match(TokenType::KEYWORD_FOR)) return parseFor();
     if (match(TokenType::KEYWORD_WHILE)) return parseWhile();
     if (match(TokenType::KEYWORD_RETURN)) return parseReturn();
+    if (match(TokenType::KEYWORD_DO)) return parseDoWhile();
+    if (match(TokenType::KEYWORD_SWITCH)) return parseSwitch();
+    if (match(TokenType::KEYWORD_BREAK)) return parseBreak();
+    if (match(TokenType::KEYWORD_CONTINUE)) return parseContinue();
+
     if (match(TokenType::KEYWORD_DISCARD)) {
         auto node = std::make_unique<DiscardNode>();
         node->line = previous_token.line;
@@ -396,7 +402,8 @@ std::unique_ptr<StatementNode> Parser::parseStatement() {
     return parseExpressionStatement();
 }
 
-std::unique_ptr<StatementNode> Parser::parseVarDecl() {
+std::unique_ptr<StatementNode> Parser::parseVarDecl() 
+{
     auto node = std::make_unique<VariableDeclNode>();
     node->line = current_token.line;
     node->type = parseTypeString();
@@ -503,6 +510,103 @@ std::unique_ptr<StatementNode> Parser::parseExpressionStatement()
     }
 
     consume(TokenType::TOKEN_SEMI, "Expected ';'");
+    return node;
+}
+
+std::unique_ptr<StatementNode> Parser::parseDoWhile() 
+{
+    auto node = std::make_unique<DoWhileNode>();
+    node->line = previous_token.line;
+    
+    // Parse Body (e.g., do { ... })
+    node->body = parseStatement();
+    
+    consume(TokenType::KEYWORD_WHILE, "Expected 'while' after 'do' body");
+    consume(TokenType::TOKEN_LPAREN, "Expected '(' after 'while'");
+    
+    node->condition = parseExpression();
+    
+    consume(TokenType::TOKEN_RPAREN, "Expected ')' after condition");
+    consume(TokenType::TOKEN_SEMI, "Expected ';' after do-while loop");
+    
+    return node;
+}
+
+std::unique_ptr<StatementNode> Parser::parseSwitch() 
+{
+    auto node = std::make_unique<SwitchNode>();
+    node->line = previous_token.line;
+    
+    consume(TokenType::TOKEN_LPAREN, "Expected '(' after 'switch'");
+    node->expression = parseExpression();
+    consume(TokenType::TOKEN_RPAREN, "Expected ')' after switch expression");
+    
+    consume(TokenType::TOKEN_LBRACE, "Expected '{' before switch body");
+    
+    while (!check(TokenType::TOKEN_RBRACE) && !check(TokenType::TOKEN_EOF)) {
+        
+        // 1. Identify Case or Default
+        bool isDefault = false;
+        if (match(TokenType::KEYWORD_CASE)) {
+            isDefault = false;
+        } else if (match(TokenType::KEYWORD_DEFAULT)) {
+            isDefault = true;
+        } else {
+            reportError("Expected 'case' or 'default' inside switch block.");
+            // Stuck parser protection (from our previous fix)
+            advance(); 
+            continue;
+        }
+
+        auto caseNode = std::make_unique<CaseNode>();
+        caseNode->line = previous_token.line;
+        caseNode->isDefault = isDefault;
+
+        // 2. Parse Value (if not default)
+        if (!isDefault) {
+            caseNode->value = parseExpression();
+        }
+        
+        consume(TokenType::TOKEN_COLON, "Expected ':' after case label");
+
+        // 3. Parse Statements until next case/default or end of switch
+        // This handles "Fallthrough" naturally (statements list will be empty)
+        while (!check(TokenType::KEYWORD_CASE) && !check(TokenType::KEYWORD_DEFAULT) && !check(TokenType::TOKEN_RBRACE) && !check(TokenType::TOKEN_EOF)) 
+        {
+            Token startToken = current_token;
+
+            auto stmt = parseStatement();
+            if (stmt) caseNode->statements.push_back(std::move(stmt));
+
+            if (current_token.line == startToken.line && 
+                current_token.column == startToken.column && 
+                current_token.type != TokenType::TOKEN_EOF) {
+                
+                // Only report if we haven't already panicked
+                if (!panicMode) reportError("Unexpected token '" + current_token.value + "' inside switch case.");
+                advance(); 
+            }
+        }
+        node->cases.push_back(std::move(caseNode));
+    }
+    
+    consume(TokenType::TOKEN_RBRACE, "Expected '}' after switch body");
+    return node;
+}
+
+std::unique_ptr<StatementNode> Parser::parseBreak() 
+{
+    auto node = std::make_unique<BreakNode>();
+    node->line = previous_token.line;
+    consume(TokenType::TOKEN_SEMI, "Expected ';' after 'break'");
+    return node;
+}
+
+std::unique_ptr<StatementNode> Parser::parseContinue() 
+{
+    auto node = std::make_unique<ContinueNode>();
+    node->line = previous_token.line;
+    consume(TokenType::TOKEN_SEMI, "Expected ';' after 'continue'");
     return node;
 }
 

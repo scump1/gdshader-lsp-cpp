@@ -196,6 +196,8 @@ void SemanticAnalyzer::visit(const ASTNode* node)
     else if (auto w = dynamic_cast<const WhileNode*>(node)) visitWhile(w);
     else if (auto ret = dynamic_cast<const ReturnNode*>(node)) visitReturn(ret);
     else if (auto es = dynamic_cast<const ExpressionStatementNode*>(node)) visitExpressionStatement(es);
+    else if (auto dw = dynamic_cast<const DoWhileNode*>(node)) visitDoWhile(dw);
+    else if (auto sw = dynamic_cast<const SwitchNode*>(node)) visitSwitch(sw);
     else if (auto d = dynamic_cast<const DiscardNode*>(node)) visitDiscard(d);
 
     else if (auto expr = dynamic_cast<const ExpressionNode*>(node)) visitExpression(expr);
@@ -299,6 +301,56 @@ void SemanticAnalyzer::visitReturn(const ReturnNode* node)
 
 void SemanticAnalyzer::visitExpressionStatement(const ExpressionStatementNode* node) {
     if (node->expr) visit(node->expr.get());
+}
+
+void SemanticAnalyzer::visitDoWhile(const DoWhileNode* node) 
+{
+    if (node->body) visit(node->body.get());
+    
+    if (node->condition) {
+        visit(node->condition.get());
+        std::string type = resolveType(node->condition.get());
+        if (type != "bool" && type != "unknown") {
+            reportError(node->condition.get(), "Do-While condition must be 'bool', found '" + type + "'");
+        }
+    }
+}
+
+void SemanticAnalyzer::visitSwitch(const SwitchNode* node) 
+{
+    std::string exprType = "unknown";
+    
+    // 1. Validate Switch Expression
+    if (node->expression) {
+        visit(node->expression.get());
+        exprType = resolveType(node->expression.get());
+        
+        // GLSL/Godot Switch only allows integers
+        if (exprType != "int" && exprType != "uint" && exprType != "unknown") {
+            reportError(node->expression.get(), "Switch expression must be 'int' or 'uint', found '" + exprType + "'");
+        }
+    }
+
+    // 2. Validate Cases
+    for (const auto& c : node->cases) {
+
+        if (!c->isDefault && c->value) {
+            visit(c->value.get());
+            std::string caseType = resolveType(c->value.get());
+            
+            if (exprType != "unknown" && caseType != "unknown" && caseType != exprType) {
+                reportError(c->value.get(), "Case value type '" + caseType + "' does not match switch type '" + exprType + "'");
+            }
+            
+            if (!isConstantExpression(c->value.get())) {
+                reportError(c->value.get(), "Case label must be a constant expression.");
+            }
+        }
+
+        for (const auto& stmt : c->statements) {
+            visit(stmt.get());
+        }
+    }
 }
 
 void gdshader_lsp::SemanticAnalyzer::visitDiscard(const DiscardNode *node)
@@ -465,15 +517,19 @@ void SemanticAnalyzer::visitMemberAccess(const MemberAccessNode* node)
 {
     // 1. Check the Base (recursively)
     if (node->base) visit(node->base.get());
-
-    // 2. Resolve the Type of the Base
     std::string baseType = resolveType(node->base.get());
 
     if (baseType == "unknown" || baseType == "void") return; // Prevents cascading errors
 
-    // 3. Check if the member exists on that type
-    if (!typeRegistry.hasMember(baseType, node->member)) {
-        reportError(node, "Type '" + baseType + "' has no member '" + node->member + "'");
+    std::string memberType = typeRegistry.getMemberType(baseType, node->member);
+
+    if (memberType == "unknown") {
+        // Distinguish between Vector and Struct error messages for clarity
+        if (baseType.find("vec") != std::string::npos) {
+             reportError(node, "Invalid swizzle '" + node->member + "' for type '" + baseType + "'");
+        } else {
+             reportError(node, "Type '" + baseType + "' has no member named '" + node->member + "'");
+        }
     }
 }
 
@@ -647,6 +703,32 @@ bool gdshader_lsp::SemanticAnalyzer::isVecType(const std::string &type)
            type == "vec2" || type == "vec3" || type == "vec4";
 }
 
+bool gdshader_lsp::SemanticAnalyzer::isConstantExpression(const ExpressionNode *node)
+{
+    if (!node) return false;
+    // 1. Literal is constant
+    if (dynamic_cast<const LiteralNode*>(node)) return true;
+    
+    // 2. Identifier is constant ONLY if it is a 'const' variable
+    if (auto id = dynamic_cast<const IdentifierNode*>(node)) {
+        const Symbol* s = symbols.lookup(id->name);
+        return s && s->category == SymbolType::Const;
+    }
+
+    // 3. Binary Op is constant if both sides are constant
+    if (auto bin = dynamic_cast<const BinaryOpNode*>(node)) {
+        return isConstantExpression(bin->left.get()) && isConstantExpression(bin->right.get());
+    }
+
+    // 4. Unary Op
+    if (auto un = dynamic_cast<const UnaryOpNode*>(node)) {
+        return isConstantExpression(un->operand.get());
+    }
+    
+    // Function calls (even built-ins) are usually NOT considered constant expressions in GLSL case labels
+    return false;
+}
+
 void SemanticAnalyzer::loadBuiltinsForFunction(const std::string& funcName) 
 {
     ShaderStage scope = ShaderStage::Global;
@@ -750,7 +832,12 @@ std::string gdshader_lsp::SemanticAnalyzer::resolveType(const ExpressionNode *no
     }
     
     // 5. Member Access (The Tricky Part)
-    if (auto mem = dynamic_cast<const MemberAccessNode*>(node)) {
+    if (auto mem = dynamic_cast<const MemberAccessNode*>(node)) 
+    {
+        if (mem->member == "length") {
+            return "int"; // length() returns int
+        }
+
         std::string baseType = resolveType(mem->base.get());
 
         if (baseType == "unknown" || baseType == "void") return "unknown";

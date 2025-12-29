@@ -136,11 +136,13 @@ Token Lexer::parseIdentifier(int startLine, int startCol) {
 
     static const std::unordered_map<std::string, TokenType> keywords = {
         // Godot
+
         {"shader_type", TokenType::KEYWORD_SHADER_TYPE},
         {"render_mode", TokenType::KEYWORD_RENDER_MODE},
         {"group_uniforms", TokenType::KEYWORD_GROUP_UNIFORMS},
         
         // Qualifiers
+
         {"uniform", TokenType::KEYWORD_UNIFORM},
         {"varying", TokenType::KEYWORD_VARYING},
         {"const", TokenType::KEYWORD_CONST},
@@ -152,6 +154,7 @@ Token Lexer::parseIdentifier(int startLine, int startCol) {
         {"instance", TokenType::KEYWORD_INSTANCE},
         
         // Types
+
         {"void", TokenType::KEYWORD_VOID},
         {"bool", TokenType::KEYWORD_BOOL},
         {"int", TokenType::KEYWORD_INT},
@@ -167,13 +170,18 @@ Token Lexer::parseIdentifier(int startLine, int startCol) {
         {"mat4", TokenType::KEYWORD_MAT4},
         {"sampler2D", TokenType::KEYWORD_SAMPLER2D},
         
-
         // Control
+
         {"if", TokenType::KEYWORD_IF},
         {"else", TokenType::KEYWORD_ELSE},
         {"for", TokenType::KEYWORD_FOR},
+        {"do", TokenType::KEYWORD_DO},
         {"while", TokenType::KEYWORD_WHILE},
         {"return", TokenType::KEYWORD_RETURN},
+        {"switch", TokenType::KEYWORD_SWITCH},
+        {"case", TokenType::KEYWORD_CASE},
+        {"default", TokenType::KEYWORD_DEFAULT},
+        {"break", TokenType::KEYWORD_BREAK},
         {"discard", TokenType::KEYWORD_DISCARD},
         {"struct", TokenType::KEYWORD_STRUCT},
         {"true", TokenType::KEYWORD_TRUE},
@@ -249,6 +257,7 @@ Token Lexer::createToken() {
     if (current == '*') { advance(); return {TokenType::TOKEN_STAR, "*", startLine, startCol}; }
     if (current == '/') { advance(); return {TokenType::TOKEN_SLASH, "/", startLine, startCol}; }
     if (current == '=') { advance(); return {TokenType::TOKEN_EQUAL, "=", startLine, startCol}; }
+    if (current == ':') { advance(); return {TokenType::TOKEN_COLON, ":", startLine, startCol}; }
     if (current == ';') { advance(); return {TokenType::TOKEN_SEMI, ";", startLine, startCol}; }
     if (current == '(') { advance(); return {TokenType::TOKEN_LPAREN, "(", startLine, startCol}; }
     if (current == ')') { advance(); return {TokenType::TOKEN_RPAREN, ")", startLine, startCol}; }
@@ -259,6 +268,11 @@ Token Lexer::createToken() {
     if (current == ',') { advance(); return {TokenType::TOKEN_COMMA, ",", startLine, startCol}; }
     if (current == '!') { advance(); return {TokenType::TOKEN_EXCL, "!", startLine, startCol}; }
     if (current == '?') { advance(); return {TokenType::TOKEN_QUESTION, "?", startLine, startCol}; }
+
+    if (current == '<') { advance(); return {TokenType::TOKEN_LESS, "<", startLine, startCol}; }
+    if (current == '>') { advance(); return {TokenType::TOKEN_GREATER, ">", startLine, startCol}; }
+    if (current == '&') { advance(); return {TokenType::TOKEN_AND, "&", startLine, startCol}; }
+    if (current == '|') { advance(); return {TokenType::TOKEN_OR, "|", startLine, startCol}; }
 
     // Fallback
     advance();
@@ -278,9 +292,7 @@ Token Lexer::getNextToken() {
 
         return t;
     }
-
     return createToken();
-
 }
 
 /**

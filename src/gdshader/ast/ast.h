@@ -127,6 +127,22 @@ struct ReturnNode : public StatementNode {
     std::unique_ptr<ExpressionNode> value; // Nullable (for void)
 };
 
+struct DoWhileNode : StatementNode {
+    std::unique_ptr<StatementNode> body;
+    std::unique_ptr<ExpressionNode> condition;
+};
+
+struct CaseNode : ASTNode {
+    std::unique_ptr<ExpressionNode> value; // nullptr if 'default'
+    std::vector<std::unique_ptr<StatementNode>> statements;
+    bool isDefault = false;
+};
+
+struct SwitchNode : StatementNode {
+    std::unique_ptr<ExpressionNode> expression;
+    std::vector<std::unique_ptr<CaseNode>> cases;
+};
+
 struct DiscardNode : public StatementNode {}; // "discard;"
 
 struct BreakNode : public StatementNode {};

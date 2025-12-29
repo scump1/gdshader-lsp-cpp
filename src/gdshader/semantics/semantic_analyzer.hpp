@@ -54,6 +54,9 @@ private:
     void visitWhile(const WhileNode* node);
     void visitReturn(const ReturnNode* node);
     void visitExpressionStatement(const ExpressionStatementNode* node);
+    void visitDoWhile(const DoWhileNode* node);
+    void visitSwitch(const SwitchNode* node);
+
     void visitDiscard(const DiscardNode* node);
 
     // Expressions
@@ -73,6 +76,7 @@ private:
 
     bool isProcessorFunction(const std::string& name);
     bool isVecType(const std::string& type);
+    bool isConstantExpression(const ExpressionNode* node);
 
     void reportError(const ASTNode* node, const std::string& msg);
     void loadBuiltinsForFunction(const std::string& funcName);

@@ -69,6 +69,10 @@ private:
     std::unique_ptr<StatementNode> parseWhile();
     std::unique_ptr<StatementNode> parseReturn();
     std::unique_ptr<StatementNode> parseExpressionStatement();
+    std::unique_ptr<StatementNode> parseDoWhile();
+    std::unique_ptr<StatementNode> parseSwitch();
+    std::unique_ptr<StatementNode> parseBreak();
+    std::unique_ptr<StatementNode> parseContinue();
 
     // --- Expression Parsing (Precedence Climbing) ---
     std::unique_ptr<ExpressionNode> parseExpression();

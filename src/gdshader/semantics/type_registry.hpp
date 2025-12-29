@@ -74,6 +74,7 @@ public:
             if (memIt != info.members.end()) {
                 return memIt->second; // Return the actual type (e.g., "vec3")
             }
+            return "unknown";
         }
 
         // 2. Vector Swizzling
