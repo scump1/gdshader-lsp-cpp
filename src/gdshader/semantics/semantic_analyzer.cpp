@@ -275,6 +275,9 @@ void SemanticAnalyzer::visit(const ASTNode* node)
     else if (auto sw = dynamic_cast<const SwitchNode*>(node)) visitSwitch(sw);
     else if (auto d = dynamic_cast<const DiscardNode*>(node)) visitDiscard(d);
 
+    else if (auto inc = dynamic_cast<const IncludeNode*>(node)) visitInclude(inc);
+    else if (auto def = dynamic_cast<const DefineNode*>(node)) visitDefine(def);
+
     else if (auto expr = dynamic_cast<const ExpressionNode*>(node)) visitExpression(expr);
 }
 
@@ -324,6 +327,30 @@ void gdshader_lsp::SemanticAnalyzer::visitInclude(const IncludeNode *node)
             }
 
         }
+    }
+}
+
+void gdshader_lsp::SemanticAnalyzer::visitDefine(const DefineNode *node)
+{
+    if (node->value) {
+        visit(node->value.get());
+        TypePtr type = resolveType(node->value.get());
+        
+        // Register as a Const Symbol
+        // This allows it to be used in array sizes (float x[MAX_LIGHTS]) and math!
+        Symbol s{node->name, type, {type}, SymbolType::Const, node->line, 0, "Macro Definition"};
+        
+        if (!symbols.add(s)) {
+            // Optional: Warn about macro redefinition?
+        }
+    } 
+    // Case 2: #define USE_FOG (Flag only)
+    else {
+        // We register flags as boolean constants so they appear in autocomplete
+        // but typically they aren't used in expressions (unless inside #ifdef).
+        TypePtr type = typeRegistry.getType("bool");
+        Symbol s{node->name, type, {type}, SymbolType::Const, node->line, 0, "Preprocessor Flag"};
+        symbols.add(s);
     }
 }
 

@@ -6,7 +6,11 @@ This tool provides advanced code intelligence, strict type checking, and real-ti
 
 ## Features
 
-This LSP is feature complete. It handles all requests like any other full-featured language server. From autocompletion to hover, go-to definitions and even syntax highliting. 
+This LSP is a work in progress, but supports most of the gdshader implementation.
+
+### Features Working
+
+### Features Missing
 
 ### Dev Insights
 

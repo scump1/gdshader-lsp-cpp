@@ -39,8 +39,9 @@ private:
 
     // Top Level
 
-    void visitInclude(const IncludeNode* node);
     void visitProgram(const ProgramNode* node);
+    void visitInclude(const IncludeNode* node);
+    void visitDefine(const DefineNode* node);
     void visitShaderType(const ShaderTypeNode* node);
     void visitUniform(const UniformNode* node);
     void visitVarying(const VaryingNode* node);

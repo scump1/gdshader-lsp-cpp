@@ -128,7 +128,7 @@ std::unique_ptr<ASTNode> gdshader_lsp::Parser::parsePreprocessor()
         
         // --- #include PATH ---
         else if (directive == "include") {
-            if (match(TokenType::TOKEN_IDENTIFIER)) {
+            if (match(TokenType::TOKEN_STRING)) {
                 auto node = std::make_unique<IncludeNode>();
                 node->line = startLine;
                 node->path = previous_token.value;
