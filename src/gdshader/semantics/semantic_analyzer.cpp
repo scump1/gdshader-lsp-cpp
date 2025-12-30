@@ -1,5 +1,6 @@
 
 #include "gdshader/semantics/semantic_analyzer.hpp"
+#include "server/project_manager.hpp"
 
 namespace gdshader_lsp {
 
@@ -292,6 +293,32 @@ void SemanticAnalyzer::visitProgram(const ProgramNode* node)
         // Skip ShaderType as we already handled it
         if (dynamic_cast<const ShaderTypeNode*>(child.get())) continue;
         visit(child.get());
+    }
+}
+
+void gdshader_lsp::SemanticAnalyzer::visitInclude(const IncludeNode *node)
+{
+    auto pm = ProjectManager::get_singleton();
+    std::string absPath = pm->resolvePath(currentFilePath, node->path);
+
+    // 2. Ask PM for exports (this triggers recursion if needed)
+    auto exportedSymbols = pm->getExports(absPath);
+
+    if (!exportedSymbols) {
+        reportError(node, "Could not load include: " + node->path + " (Cycle or Not Found)");
+        return;
+    }
+
+    const auto& globals = exportedSymbols->getGlobals();
+    
+    for (const auto& [name, overloadList] : globals) {
+        for (const auto& sym : overloadList) {
+            // Check for collisions in current file?
+            // Usually, includes act like copy-paste, so redefinition errors are valid.
+            if (!symbols.add(sym)) {
+                reportError(node, "Symbol '" + name + "' imported from " + node->path + " conflicts with existing symbol.");
+            }
+        }
     }
 }
 

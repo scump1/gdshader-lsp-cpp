@@ -91,11 +91,143 @@ void Parser::synchronize() {
 }
 
 // -------------------------------------------------------------------------
+// PREPROCESSOR STACK
+// -------------------------------------------------------------------------
+
+std::unique_ptr<ASTNode> gdshader_lsp::Parser::parsePreprocessor()
+{
+    int startLine = previous_token.line; // The line of the '#' token
+
+    // 1. Consume the directive name (define, ifdef, etc.)
+    if (check(TokenType::TOKEN_IDENTIFIER)) {
+        std::string directive = current_token.value;
+        advance();
+
+        // --- #define NAME value ---
+        if (directive == "define") {
+            auto node = std::make_unique<DefineNode>();
+            node->line = startLine;
+
+            if (match(TokenType::TOKEN_IDENTIFIER)) {
+                node->name = previous_token.value;
+                activeDefines.insert(node->name); // Track for local #ifdef logic
+                
+                // Parse value (only if on the same line!)
+                if (current_token.line == startLine) {
+                    node->value = parseExpression();
+                }
+                return node;
+            }
+        }
+        
+        // --- #include PATH ---
+        else if (directive == "include") {
+            if (match(TokenType::TOKEN_IDENTIFIER)) {
+                auto node = std::make_unique<IncludeNode>();
+                node->line = startLine;
+
+                if (match(TokenType::TOKEN_IDENTIFIER)) {
+                    // Parse value (only if on the same line!)
+                    if (current_token.line == startLine) {
+                        node->path = current_token.value;
+                    }
+                    return node;
+                }
+            }
+        }
+
+        // --- #ifdef NAME ---
+        else if (directive == "ifdef") {
+            if (match(TokenType::TOKEN_IDENTIFIER)) {
+                bool exists = activeDefines.count(previous_token.value);
+                preprocessorStack.push_back(exists);
+                
+                if (!exists) skipBlock(); // Skip if false
+                return nullptr; // No AST node for control directives
+            }
+        }
+        
+        // --- #ifndef NAME ---
+        else if (directive == "ifndef") {
+             if (match(TokenType::TOKEN_IDENTIFIER)) {
+                bool exists = activeDefines.count(previous_token.value);
+                preprocessorStack.push_back(!exists);
+                
+                if (exists) skipBlock(); // Skip if true
+                return nullptr;
+            }
+        }
+        
+        // --- #else ---
+        else if (directive == "else") {
+            if (preprocessorStack.empty()) {
+                reportError("#else without #if");
+                return nullptr;
+            }
+            
+            // Toggle state: If we were parsing (true), now we skip.
+            // If we were skipping (false), was it because the parent was skipped?
+            // Simplification: logic is tricky, usually we just flip the top.
+            
+            bool wasParsing = preprocessorStack.back();
+            preprocessorStack.back() = !wasParsing;
+            
+            if (wasParsing) skipBlock(); // Skip the 'else' block
+            return nullptr;
+        }
+
+        // --- #endif ---
+        else if (directive == "endif") {
+            if (preprocessorStack.empty()) {
+                reportError("#endif without #if");
+            } else {
+                preprocessorStack.pop_back();
+            }
+            return nullptr;
+        }
+    }
+    return nullptr;
+}
+
+void gdshader_lsp::Parser::skipBlock()
+{
+    int depth = 0;
+
+    while (current_token.type != TokenType::TOKEN_EOF) {
+        
+        if (current_token.type == TokenType::TOKEN_PREPROCESSOR) {
+            Token peek = lexer.peekToken(0); // Look at directive name
+            
+            if (peek.value == "ifdef" || peek.value == "ifndef" || peek.value == "if") {
+                depth++;
+            }
+            else if (peek.value == "endif") {
+                if (depth == 0) {
+                    // Do NOT consume the #endif here, 
+                    // main loop does it so it pops the stack.
+                    return; 
+                }
+                depth--;
+            }
+            else if (peek.value == "else" && depth == 0) {
+                // Found our toggle point
+                return;
+            }
+        }
+        
+        advance(); // Eat token
+    }
+}
+
+// -------------------------------------------------------------------------
 // TOP LEVEL
 // -------------------------------------------------------------------------
 
-std::unique_ptr<ASTNode> Parser::parseTopLevelDecl() {
+std::unique_ptr<ASTNode> Parser::parseTopLevelDecl() 
+{
     try {
+
+        if (match(TokenType::TOKEN_PREPROCESSOR))  return parsePreprocessor();
         if (match(TokenType::KEYWORD_SHADER_TYPE)) return parseShaderType();
         if (match(TokenType::KEYWORD_RENDER_MODE)) return parseRenderMode();
         if (match(TokenType::KEYWORD_UNIFORM))     return parseUniform();

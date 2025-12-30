@@ -6,25 +6,14 @@
 #include <string>
 #include <optional>
 
+#include <unordered_set>
+
 #include "gdshader/lexer/lexer.h"
 #include "gdshader/lexer/lexer_types.h"
 #include "gdshader/ast/ast.h"
+#include "gdshader/diagnostics.hpp"
 
 namespace gdshader_lsp {
-
-enum class DiagnosticLevel {
-    Error,
-    Warning
-};
-
-struct Diagnostic {
-    int line;
-    int column;
-    std::string message;
-    DiagnosticLevel level = DiagnosticLevel::Error;
-
-    int length = 0;
-};
 
 class Parser {
 public:
@@ -37,12 +26,21 @@ public:
     const std::vector<Diagnostic>& getDiagnostics() const { return diagnostics; }
 
 private:
+
     Lexer& lexer;
     Token current_token;
     Token previous_token; // Useful for getting locations of consumed tokens
     
     std::vector<Diagnostic> diagnostics;
     bool panicMode = false;
+
+    // --- Preprocessor stack ---
+
+    std::vector<bool> preprocessorStack;
+    std::unordered_set<std::string> activeDefines;
+
+    std::unique_ptr<ASTNode> parsePreprocessor();
+    void skipBlock();
 
     // --- Core Helpers ---
     void advance();

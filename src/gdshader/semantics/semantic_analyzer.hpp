@@ -27,6 +27,8 @@ private:
 
     // State
     
+    std::string currentFilePath;
+
     ShaderType currentShaderType = ShaderType::Spatial; // Default
     ShaderStage currentProcessorFunction = ShaderStage::Global;
     
@@ -37,6 +39,7 @@ private:
 
     // Top Level
 
+    void visitInclude(const IncludeNode* node);
     void visitProgram(const ProgramNode* node);
     void visitShaderType(const ShaderTypeNode* node);
     void visitUniform(const UniformNode* node);
@@ -101,6 +104,8 @@ public:
      * @return AnalysisResult 
      */
     AnalysisResult analyze(const ProgramNode* ast);
+    
+    void setFilePath(const std::string& path) { currentFilePath = path; }
 
 };
 
