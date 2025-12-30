@@ -318,6 +318,11 @@ void gdshader_lsp::SemanticAnalyzer::visitInclude(const IncludeNode *node)
             if (!symbols.add(sym)) {
                 reportError(node, "Symbol '" + name + "' imported from " + node->path + " conflicts with existing symbol.");
             }
+
+            if (sym.category == SymbolType::Struct) {
+                typeRegistry.registerStruct(sym.name, sym.type->members);
+            }
+
         }
     }
 }

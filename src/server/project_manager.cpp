@@ -91,8 +91,9 @@ std::shared_ptr<SymbolTable> ProjectManager::getExports(const std::string& path)
     // 2. Parse (if needed)
     if (!unit->ast && !unit->source_code.empty()) {
         Lexer lexer(unit->source_code);
-        Parser parser(lexer);
+        Parser parser(lexer, path);
         unit->ast = parser.parse();
+        unit->defines = parser.getDefines();
     }
 
     // 3. Analyze (to generate Symbol Table)
@@ -103,6 +104,7 @@ std::shared_ptr<SymbolTable> ProjectManager::getExports(const std::string& path)
         
         AnalysisResult result = analyzer.analyze(unit->ast.get());
         unit->symbols = std::make_shared<SymbolTable>(std::move(result.symbols));
+        unit->types = std::move(result.types);
 
     } else {
         // Create empty table if parsing failed

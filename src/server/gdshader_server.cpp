@@ -443,10 +443,12 @@ void gdshader_lsp::GdShaderServer::compileAndPublish(const lsp::DocumentUri& uri
 
     // 1. Run Lexer & Parser
     Lexer lexer(code);
-    Parser parser(lexer);
+    Parser parser(lexer, path);
     
     auto ast = parser.parse();
     auto errors = parser.getDiagnostics();
+
+    su->defines = parser.getDefines();
 
     if (ast) {
         auto result = analyzer.analyze(ast.get());

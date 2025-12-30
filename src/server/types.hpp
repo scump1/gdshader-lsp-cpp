@@ -21,6 +21,8 @@ struct ShaderUnit {
     std::string source_code;
     int version = 0;
 
+    std::unordered_set<std::string> defines;
+
     std::unique_ptr<ProgramNode> ast;
     std::shared_ptr<SymbolTable> symbols;
     TypeRegistry types;

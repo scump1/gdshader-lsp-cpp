@@ -1,4 +1,8 @@
-#include "parser.hpp"
+
+#include "gdshader/parser/parser.hpp"
+
+#include "server/project_manager.hpp"
+
 #include <iostream>
 
 namespace gdshader_lsp {
@@ -7,7 +11,8 @@ namespace gdshader_lsp {
 // CORE
 // -------------------------------------------------------------------------
 
-Parser::Parser(Lexer& lexer) : lexer(lexer) {
+Parser::Parser(Lexer& lexer, const std::string& path) : lexer(lexer), currentPath(path) 
+{
     advance(); // Load first token
 }
 
@@ -111,6 +116,7 @@ std::unique_ptr<ASTNode> gdshader_lsp::Parser::parsePreprocessor()
             if (match(TokenType::TOKEN_IDENTIFIER)) {
                 node->name = previous_token.value;
                 activeDefines.insert(node->name); // Track for local #ifdef logic
+                localDefines.insert(node->name);
                 
                 // Parse value (only if on the same line!)
                 if (current_token.line == startLine) {
@@ -125,26 +131,56 @@ std::unique_ptr<ASTNode> gdshader_lsp::Parser::parsePreprocessor()
             if (match(TokenType::TOKEN_IDENTIFIER)) {
                 auto node = std::make_unique<IncludeNode>();
                 node->line = startLine;
+                node->path = previous_token.value;
 
-                if (match(TokenType::TOKEN_IDENTIFIER)) {
-                    // Parse value (only if on the same line!)
-                    if (current_token.line == startLine) {
-                        node->path = current_token.value;
-                    }
-                    return node;
+                auto pm = ProjectManager::get_singleton();
+                std::string absPath = pm->resolvePath(currentPath, node->path);
+
+                auto unit = pm->getUnit(absPath);
+                pm->getExports(absPath);
+
+                for (const auto& def : unit->defines) {
+                    activeDefines.insert(def);
                 }
+
+                return node;
             }
         }
 
         // --- #ifdef NAME ---
         else if (directive == "ifdef") {
             if (match(TokenType::TOKEN_IDENTIFIER)) {
-                bool exists = activeDefines.count(previous_token.value);
-                preprocessorStack.push_back(exists);
-                
-                if (!exists) skipBlock(); // Skip if false
-                return nullptr; // No AST node for control directives
+                bool condition = evaluatePreprocessorExpression();
+                preprocessorStack.push_back(condition);
+                if (!condition) skipBlock();
+                return nullptr;
             }
+        }
+
+        else if (directive == "elif") {
+             if (preprocessorStack.empty()) {
+                reportError("#elif without #if");
+            } else {
+                // Logic: If the previous #if was TRUE, we are currently parsing.
+                // We must now SKIP this #elif block regardless of condition.
+                // If previous was FALSE, we evaluate this condition.
+                
+                bool previousWasTrue = preprocessorStack.back();
+                
+                if (previousWasTrue) {
+                    // Previous block ran, so we skip this one
+                    preprocessorStack.back() = true; // Stay in "True" state to keep skipping future elif/else? 
+                    // Actually, stack usually tracks "Is the *Current* block active?"
+                    // Better logic: The stack should track "Has any branch in this chain executed?"
+                    // This gets complex. Simplified version:
+                    skipBlock(); 
+                } else {
+                    bool condition = evaluatePreprocessorExpression();
+                    preprocessorStack.back() = condition; // Update state
+                    if (!condition) skipBlock();
+                }
+            }
+            return nullptr;
         }
         
         // --- #ifndef NAME ---
@@ -219,6 +255,53 @@ void gdshader_lsp::Parser::skipBlock()
     }
 }
 
+bool gdshader_lsp::Parser::evaluatePreprocessorExpression()
+{
+    bool result = true;
+    
+    // Handle "defined(X)"
+    if (current_token.value == "defined") {
+        advance();
+        consume(TokenType::TOKEN_LPAREN, "Expected '(' after defined");
+        if (check(TokenType::TOKEN_IDENTIFIER)) {
+            std::string name = current_token.value;
+            result = (activeDefines.count(name) > 0);
+            advance();
+        }
+        consume(TokenType::TOKEN_RPAREN, "Expected ')'");
+    } 
+    // Handle boolean literals
+    else if (current_token.type == TokenType::KEYWORD_TRUE) {
+        result = true;
+        advance();
+    }
+    else if (current_token.type == TokenType::KEYWORD_FALSE) {
+        result = false;
+        advance();
+    }
+    // Handle identifiers as boolean flags
+    else if (current_token.type == TokenType::TOKEN_IDENTIFIER) {
+        result = (activeDefines.count(current_token.value) > 0);
+        advance();
+    }
+    // Handle Negation "!"
+    else if (match(TokenType::TOKEN_EXCL)) {
+        return !evaluatePreprocessorExpression();
+    }
+
+    // Handle "&&" and "||" (Basic support)
+    if (match(TokenType::TOKEN_AND)) {
+        bool right = evaluatePreprocessorExpression();
+        return result && right;
+    }
+    if (match(TokenType::TOKEN_OR)) {
+        bool right = evaluatePreprocessorExpression();
+        return result || right;
+    }
+
+    return result;
+}
+
 // -------------------------------------------------------------------------
 // TOP LEVEL
 // -------------------------------------------------------------------------
@@ -235,24 +318,6 @@ std::unique_ptr<ASTNode> Parser::parseTopLevelDecl()
         if (match(TokenType::KEYWORD_CONST))       return parseConst();
         if (match(TokenType::KEYWORD_STRUCT))      return parseStruct();
         
-        if (match(TokenType::TOKEN_PREPROCESSOR)) {
-            // Consume the directive (e.g. "include", "define", "ifdef")
-            if (check(TokenType::TOKEN_IDENTIFIER)) advance(); 
-            
-            // Pattern: #include "string"
-            if (previous_token.value == "#" && check(TokenType::TOKEN_STRING)) {
-                advance(); // consume string
-            }
-            // Pattern: #define NAME value
-            else if (previous_token.value == "#" && current_token.value == "define") {
-                advance(); // define
-                advance(); // NAME
-                parseExpression(); // value
-            }
-            
-            return nullptr; // Return null (no AST node) but don't error
-        }
-
         // Functions or Globals usually start with a type (void, vec3, etc.)
         if (isTypeStart()) {
             return parseTypeIdentifierDecl();

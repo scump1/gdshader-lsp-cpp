@@ -17,32 +17,40 @@ namespace gdshader_lsp {
 
 class Parser {
 public:
-    Parser(Lexer& lexer);
+    Parser(Lexer& lexer, const std::string& path);
 
     // Main entry point
     std::unique_ptr<ProgramNode> parse();
 
     // Retrieve errors after parsing
     const std::vector<Diagnostic>& getDiagnostics() const { return diagnostics; }
+    const std::unordered_set<std::string>& getDefines() const { return localDefines; }
 
 private:
 
     Lexer& lexer;
-    Token current_token;
-    Token previous_token; // Useful for getting locations of consumed tokens
+    Token current_token {};
+    Token previous_token {}; // Useful for getting locations of consumed tokens
     
-    std::vector<Diagnostic> diagnostics;
+    std::vector<Diagnostic> diagnostics {};
     bool panicMode = false;
 
     // --- Preprocessor stack ---
 
-    std::vector<bool> preprocessorStack;
-    std::unordered_set<std::string> activeDefines;
+    std::vector<bool> preprocessorStack {};
+    std::unordered_set<std::string> activeDefines {};
 
     std::unique_ptr<ASTNode> parsePreprocessor();
     void skipBlock();
 
+    // --- State ---
+
+    std::string currentPath {};
+    std::unordered_set<std::string> localDefines {};
+    bool evaluatePreprocessorExpression();
+
     // --- Core Helpers ---
+
     void advance();
     void consume(TokenType type, const std::string& message);
     bool match(TokenType type);
