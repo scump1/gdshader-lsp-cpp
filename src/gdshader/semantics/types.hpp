@@ -21,7 +21,8 @@ enum class TypeKind {
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
-struct Type {
+struct Type 
+{
     TypeKind kind = TypeKind::UNKNOWN;
     std::string name; // "vec3", "MyStruct", "int"
     
@@ -34,23 +35,42 @@ struct Type {
     // For Structs: Members (Ordered for constructor validation)
     std::vector<std::pair<std::string, TypePtr>> members;
 
-    // --- Comparison Logic ---
+    bool operator!=(const Type& other) const { return !(*this == other); }
     bool operator==(const Type& other) const {
+        // 1. Simple checks
         if (this == &other) return true;
         if (kind != other.kind) return false;
-
-        // Arrays are structurally typed: float[5] == float[5]
-        if (kind == TypeKind::ARRAY) {
-            return arraySize == other.arraySize && 
-                   (baseType && other.baseType && *baseType == *other.baseType);
+        if (name != other.name) return false;
+        
+        // 2. Kind-specific checks
+        
+        // For Arrays and Vectors, check the dimensions and the inner type
+        if (kind == TypeKind::ARRAY || kind == TypeKind::VECTOR || kind == TypeKind::MATRIX) {
+            if (componentCount != other.componentCount) return false;
+            
+            // Recursive check for the base type (e.g., 'float' inside 'vec3')
+            // We must handle nullptrs safely, though baseType should valid.
+            if (baseType && other.baseType) {
+                if (*baseType != *other.baseType) return false;
+            } else if (baseType != other.baseType) {
+                return false; // One is null, the other isn't
+            }
         }
 
-        // Structs/Builtins are nominative: "MyStruct" == "MyStruct"
-        // (In GLSL/GDShader, two structs with same fields but different names are NOT compatible)
-        return name == other.name;
-    }
+        // For Structs, check members
+        if (kind == TypeKind::STRUCT) {
+            if (members.size() != other.members.size()) return false;
+            for (size_t i = 0; i < members.size(); ++i) {
+                // Check member name (optional, but good for strictness)
+                if (members[i].first != other.members[i].first) return false;
+                
+                // Check member type recursively
+                if (*members[i].second != *other.members[i].second) return false;
+            }
+        }
 
-    bool operator!=(const Type& other) const { return !(*this == other); }
+        return true;
+    }
     
     // Helper for diagnostics
     std::string toString() const {

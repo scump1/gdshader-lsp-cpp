@@ -422,11 +422,8 @@ std::unique_ptr<StatementNode> Parser::parseStatement()
         consume(TokenType::TOKEN_SEMI, "Expected ';'");
         return node;
     }
-    if (match(TokenType::TOKEN_LBRACE)) {
-        // Nested block
-        // Hack: parseBlock returns BlockNode which inherits StatementNode
-        // but unique_ptr casting requires care. Usually works if inheritance is public.
-        // We'll return it directly (BlockNode is a StatementNode)
+
+    if (check(TokenType::TOKEN_LBRACE)) {
         return parseBlock(); 
     }
     
@@ -654,16 +651,20 @@ std::unique_ptr<ExpressionNode> Parser::parseExpression() {
     return parseAssignment();
 }
 
-std::unique_ptr<ExpressionNode> Parser::parseAssignment() {
+std::unique_ptr<ExpressionNode> Parser::parseAssignment() 
+{
     auto expr = parseTernary();
 
-    if (match(TokenType::TOKEN_EQUAL) || match(TokenType::TOKEN_PLUS) /* += etc */ ) {
-        // Note: keeping it simple with just = for now, but handling += needs opcode mapping
+    if (match(TokenType::TOKEN_EQUAL) || 
+        match(TokenType::TOKEN_PLUS_EQUAL) ||
+        match(TokenType::TOKEN_MINUS_EQUAL) ||
+        match(TokenType::TOKEN_STAR_EQUAL) ||
+        match(TokenType::TOKEN_SLASH_EQUAL) ||
+        match(TokenType::TOKEN_PERCENT_EQUAL)) {
+        
         TokenType op = previous_token.type;
         auto right = parseAssignment();
         
-        // Wrap in BinaryOp for assignment? Or specific AssignmentNode?
-        // Let's use BinaryOpNode with TOKEN_EQUAL for now
         auto node = std::make_unique<BinaryOpNode>();
         node->line = previous_token.line;
         node->column = previous_token.column;

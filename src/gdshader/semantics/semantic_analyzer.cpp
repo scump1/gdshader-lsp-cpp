@@ -150,7 +150,7 @@ void SemanticAnalyzer::visitFunction(const FunctionNode* node)
     Symbol funcSym{
         node->name, 
         returnType, 
-        paramTypes,        // <--- NEW
+        paramTypes,
         SymbolType::Function, 
         node->line, 
         node->column, 
@@ -427,7 +427,12 @@ void SemanticAnalyzer::visitIdentifier(const IdentifierNode* node)
 void SemanticAnalyzer::visitBinaryOp(const BinaryOpNode* node) 
 {
     // Check for assignment to const/read-only
-    if (node->op == TokenType::TOKEN_EQUAL) {
+    bool isAssignment = (node->op == TokenType::TOKEN_EQUAL || node->op == TokenType::TOKEN_PLUS_EQUAL ||
+                        node->op == TokenType::TOKEN_MINUS_EQUAL || node->op == TokenType::TOKEN_STAR_EQUAL || 
+                        node->op == TokenType::TOKEN_SLASH_EQUAL || node->op == TokenType::TOKEN_PERCENT_EQUAL);
+
+    if (isAssignment)
+    {
         visitAssignment(node);
         return;
     }
@@ -464,6 +469,64 @@ void SemanticAnalyzer::visitAssignment(const BinaryOpNode* node)
         lType = resolveType(node->left.get());
     }
 
+    // 3. Permission Checks (Const, Uniform, Varying)
+    if (s) {
+        if (s->category == SymbolType::Const) {
+            reportError(node->left.get(), "Cannot assign to constant '" + s->name + "'");
+        } 
+        else if (s->category == SymbolType::Uniform) {
+            reportError(node->left.get(), "Cannot assign to uniform '" + s->name + "'");
+        }
+        else if (s->category == SymbolType::Varying && currentProcessorFunction != ShaderStage::Vertex) {
+            reportError(node->left.get(), "Varyings are read-only in the fragment processor.");
+        }
+    }
+
+    TypePtr rType = resolveType(node->right.get());
+    if (lType->kind == TypeKind::UNKNOWN || rType->kind == TypeKind::UNKNOWN) return;
+
+    // 3. Logic for Assignment vs Compound Assignment
+    if (node->op == TokenType::TOKEN_EQUAL) {
+        // Simple Assignment (=)
+        // Strict match or safe implicit conversion (e.g. float = int)
+        int cost = getConversionCost(rType, lType);
+        if (cost == -1) {
+             reportError(node, "Type mismatch: Cannot assign '" + rType->toString() + 
+                         "' to '" + lType->toString() + "'");
+        }
+    }
+    else {
+        // Compound Assignment (+=, *=, etc.)
+        // We must check if the MATH operation is valid, and if the RESULT fits in LHS.
+        
+        TokenType mathOp;
+        switch (node->op) {
+            case TokenType::TOKEN_PLUS_EQUAL:    mathOp = TokenType::TOKEN_PLUS; break;
+            case TokenType::TOKEN_MINUS_EQUAL:   mathOp = TokenType::TOKEN_MINUS; break;
+            case TokenType::TOKEN_STAR_EQUAL:    mathOp = TokenType::TOKEN_STAR; break;
+            case TokenType::TOKEN_SLASH_EQUAL:   mathOp = TokenType::TOKEN_SLASH; break;
+            case TokenType::TOKEN_PERCENT_EQUAL: mathOp = TokenType::TOKEN_PERCENT; break;
+            default: mathOp = TokenType::TOKEN_ERROR; break;
+        }
+
+        // 1. Check if the math is valid (e.g. vec2 * float -> vec2)
+        TypePtr resultType = getBinaryOpResultType(lType, rType, mathOp);
+        
+        if (resultType->kind == TypeKind::UNKNOWN) {
+            reportError(node, "Invalid operation for compound assignment.");
+            return;
+        }
+
+        // 2. Check if the result can be assigned back to LHS
+        // e.g. int += float -> (int + float) is float. float cannot be assigned to int. Error.
+        // e.g. vec2 *= float -> (vec2 * float) is vec2. vec2 can be assigned to vec2. OK.
+        int cost = getConversionCost(resultType, lType);
+        if (cost == -1) {
+            reportError(node, "Type mismatch: Result of compound assignment '" + resultType->toString() + 
+                        "' cannot be assigned to '" + lType->toString() + "'");
+        }
+    }
+
     const ExpressionNode* lhs = node->left.get();
     
     if (auto mem = dynamic_cast<const MemberAccessNode*>(lhs)) {
@@ -496,29 +559,7 @@ void SemanticAnalyzer::visitAssignment(const BinaryOpNode* node)
         }
     }
 
-    // 3. Permission Checks (Const, Uniform, Varying)
-    if (s) {
-        if (s->category == SymbolType::Const) {
-            reportError(node->left.get(), "Cannot assign to constant '" + s->name + "'");
-        } 
-        else if (s->category == SymbolType::Uniform) {
-            reportError(node->left.get(), "Cannot assign to uniform '" + s->name + "'");
-        }
-        else if (s->category == SymbolType::Varying) {
-            
-            if (currentProcessorFunction == ShaderStage::Light) {
-                reportError(node->left.get(), "Varying '" + s->name + "' cannot be assigned in the light processor.");
-            }
-            if (currentProcessorFunction != ShaderStage::Vertex) {
-                reportError(node->left.get(), "Varyings are read-only in the fragment processor.");
-            }
-        }
-    }
-
-    TypePtr rType = resolveType(node->right.get());
-    if (lType->kind != TypeKind::UNKNOWN && rType->kind != TypeKind::UNKNOWN && *lType != *rType) {
-        reportError(node, "Type mismatch in assignment");
-    }
+    
 }
 
 void gdshader_lsp::SemanticAnalyzer::visitArrayAccess(const ArrayAccessNode *node)
@@ -575,36 +616,15 @@ void SemanticAnalyzer::visitFunctionCall(const FunctionCallNode* node)
         return;
     }
 
-    // 3. Overload Resolution
-    const Symbol* match = nullptr;
+    const Symbol* bestMatch = findBestOverload(node, argTypes);
     
-    for (const auto* sym : candidates) {
-        if (sym->parameterTypes.size() != argTypes.size()) continue;
-
-        bool signatureMatches = true;
-        for (size_t i = 0; i < argTypes.size(); i++) {
-            // Strict matching (you can add implicit casting here later)
-            if (argTypes[i]->kind != TypeKind::UNKNOWN && *sym->parameterTypes[i] != *argTypes[i]) {
-                signatureMatches = false;
-                break;
-            }
-        }
-        
-        if (signatureMatches) {
-            match = sym;
-            break; 
-        }
-    }
-    
-    if (!match) {
-        // Improve error message to show what was expected
+    if (!bestMatch) {
+        // Construct a helpful error message
         std::string argsStr = "";
         for(auto& t : argTypes) argsStr += t->toString() + ", ";
-        if (!argsStr.empty()) {
-            argsStr.pop_back(); 
-            argsStr.pop_back();
-        } 
-        reportError(node, "No matching function for '" + name + "(" + argsStr + ")'");
+        if (!argsStr.empty()) { argsStr.pop_back(); argsStr.pop_back(); } 
+        
+        reportError(node, "No matching function for '" + name + "(" + argsStr + ")'. Candidates found: " + std::to_string(candidates.size()));
     }
 }
 
@@ -665,13 +685,11 @@ void SemanticAnalyzer::validateConstructor(const FunctionCallNode* node, const s
         for (const auto& arg : node->arguments) {
             TypePtr argT = resolveType(arg.get());
             
-            // 1. Basic Type Check
-            // Ensure base types match (e.g. no bools in vec3 constructor)
-            if (argT->baseType && target->baseType && *argT->baseType != *target->baseType) {
-                // Exception: vec3(float) is valid (splatting)
-                if (node->arguments.size() == 1 && argT->kind == TypeKind::SCALAR) return; 
-                
-                reportError(arg.get(), "Type mismatch in constructor.");
+            // Allow constructing vectors from any Scalar or Vector type (implicit casting)
+            // e.g. vec2(ivec2) or vec2(int, float) is valid.
+            // We only check if valid types are passed (no structs/arrays).
+            if (argT->kind != TypeKind::SCALAR && argT->kind != TypeKind::VECTOR) {
+                reportError(arg.get(), "Invalid argument for vector constructor.");
             }
 
             // 2. Count Components
@@ -679,7 +697,7 @@ void SemanticAnalyzer::validateConstructor(const FunctionCallNode* node, const s
         }
 
         // Exception: Splatting (vec3(1.0) -> 1,1,1)
-        if (provided == 1 && expected > 1) return;
+        if (node->arguments.size() == 1 && provided == 1 && expected > 1) return;
 
         if (provided != expected) {
             reportError(node, "Invalid constructor. Expected " + std::to_string(expected) + 
@@ -687,6 +705,30 @@ void SemanticAnalyzer::validateConstructor(const FunctionCallNode* node, const s
         }
         return;
     }
+
+    if (target->kind == TypeKind::MATRIX) {
+        int expected = target->componentCount * target->componentCount; // e.g., mat2 is 2x2 = 4
+
+        if (target->name == "mat2") expected = 4;
+        else if (target->name == "mat3") expected = 9;
+        else if (target->name == "mat4") expected = 16;
+        
+        int provided = 0;
+        for (const auto& arg : node->arguments) {
+            TypePtr argT = resolveType(arg.get());
+            if (argT->kind == TypeKind::SCALAR) provided += 1;
+            else if (argT->kind == TypeKind::VECTOR) provided += argT->componentCount;
+            // Matrices can also be constructed from other matrices, which is complex to validate
+            else if (argT->kind == TypeKind::MATRIX) provided += 100; // Let's just assume it's fine for now
+        }
+
+        // Only complain if we clearly don't have enough components
+        // (excluding the generic matrix-from-matrix case)
+        if (provided < expected && provided < 50) {
+            reportError(node, "Not enough components to construct '" + typeName + "'");
+        }
+    }
+
 }
 
 bool gdshader_lsp::SemanticAnalyzer::isProcessorFunction(const std::string &name)
@@ -790,6 +832,67 @@ TypePtr gdshader_lsp::SemanticAnalyzer::getBinaryOpResultType(TypePtr l, TypePtr
     return typeRegistry.getUnknownType();
 }
 
+const Symbol *gdshader_lsp::SemanticAnalyzer::findBestOverload(const FunctionCallNode* node, const std::vector<TypePtr>& argTypes)
+{
+    std::string name = node->functionName;
+    auto candidates = symbols.lookupFunctions(name);
+    if (candidates.empty()) return nullptr;
+
+    // 3. Overload Resolution
+    const Symbol* bestMatch = nullptr;
+    int minCost = 999999;
+    bool isAmbiguous = false;
+
+    for (const auto* sym : candidates) {
+        // A. Check Argument Count
+        if (sym->parameterTypes.size() != argTypes.size()) continue;
+
+        // B. Calculate Cost for this Candidate
+        int currentCost = 0;
+        bool possible = true;
+
+        for (size_t i = 0; i < argTypes.size(); i++) {
+            // Check conversion for each argument
+            int cost = getConversionCost(argTypes[i], sym->parameterTypes[i]);
+            
+            if (cost == -1) {
+                possible = false;
+                break; // Argument mismatch
+            }
+            currentCost += cost;
+        }
+
+        if (possible) {
+            if (currentCost < minCost) {
+                // Found a better match
+                minCost = currentCost;
+                bestMatch = sym;
+                isAmbiguous = false;
+            } 
+            else if (currentCost == minCost) {
+                // Found another match with the exact same score -> Ambiguous
+                // (Unless it's the exact same symbol, which shouldn't happen)
+                isAmbiguous = true;
+            }
+        }
+    }
+    
+    if (isAmbiguous) {
+        reportError(node, "Ambiguous function call for '" + name + "'. Multiple overloads match these arguments.");
+    }
+    return bestMatch;
+}
+
+int gdshader_lsp::SemanticAnalyzer::getConversionCost(TypePtr from, TypePtr to)
+{
+    if (*from == *to) return 0;
+    
+    if (from->name == "int" && to->name == "float") return 1;
+    // uint -> float is usually safe
+    if (from->name == "uint" && to->name == "float") return 1;
+    return -1; // No conversion
+}
+
 const Symbol *gdshader_lsp::SemanticAnalyzer::getRootSymbol(const ExpressionNode *node, const SymbolTable &symbols)
 {
     if (auto id = dynamic_cast<const IdentifierNode*>(node)) {
@@ -859,13 +962,15 @@ TypePtr gdshader_lsp::SemanticAnalyzer::resolveType(const ExpressionNode *node)
         TypePtr t = typeRegistry.getType(call->functionName);
         if (t->kind != TypeKind::UNKNOWN) return t;
 
-        // B. Functions (User & Builtin)
-        auto candidates = symbols.lookupFunctions(call->functionName);
-        if (!candidates.empty()) {
-            // Ideally, we would run the exact same overload resolution as visitFunctionCall here.
-            // For now, returning the type of the first candidate is a safe "good enough" heuristic 
-            // because overloads in GLSL usually return the same type category (vec for vec, float for float).
-            return candidates[0]->type; 
+        std::vector<TypePtr> argTypes;
+        for (const auto& arg : call->arguments) {
+            argTypes.push_back(resolveType(arg.get()));
+        }
+
+        const Symbol* match = findBestOverload(call, argTypes);
+
+        if (match) {
+            return match->type;
         }
         
         return typeRegistry.getUnknownType();
@@ -876,6 +981,11 @@ TypePtr gdshader_lsp::SemanticAnalyzer::resolveType(const ExpressionNode *node)
         if (mem->member == "length") return typeRegistry.getType("int");
         TypePtr base = resolveType(mem->base.get());
         return typeRegistry.getMemberType(base, mem->member);
+    }
+
+    if (auto un = dynamic_cast<const UnaryOpNode*>(node)) {
+        // The type of "-x" is usually just the type of "x"
+        return resolveType(un->operand.get());
     }
 
     if (auto tern = dynamic_cast<const TernaryNode*>(node)) {
@@ -891,58 +1001,93 @@ void SemanticAnalyzer::reportError(const ASTNode* node, const std::string& msg) 
 
 void SemanticAnalyzer::registerGlobalFunctions()
 {
-    auto registerVariant = [&](const BuiltinFunction& f, const std::string& genericReplacement = "") {
-        
-        // 1. Resolve Return Type
-        std::string retTypeName = f.returnType;
-        if (!genericReplacement.empty()) {
-            // Replace "vec_type" with actual type (e.g. "vec3")
-            if (retTypeName == "vec_type" || retTypeName == "gentype") retTypeName = genericReplacement;
-        }
-        
-        TypePtr returnType = typeRegistry.getType(retTypeName);
-        // Fallback: If registry doesn't know it (e.g. "bvec"), default to void to prevent crash, 
-        // but ideally your registry has everything.
-        if (returnType->kind == TypeKind::UNKNOWN && retTypeName != "void") {
-             // Optional: Log warning here
-        }
+    const std::vector<std::string> VEC_TYPE      = {"float", "vec2", "vec3", "vec4"};
+    const std::vector<std::string> VEC_INT_TYPE  = {"int", "ivec2", "ivec3", "ivec4"};
+    const std::vector<std::string> VEC_UINT_TYPE = {"uint", "uvec2", "uvec3", "uvec4"};
+    const std::vector<std::string> VEC_BOOL_TYPE = {"bool", "bvec2", "bvec3", "bvec4"};
+    
+    // Sampler Expansion: 0=float, 1=int, 2=uint
+    const std::vector<std::string> GSAMPLER_2D      = {"sampler2D", "isampler2D", "usampler2D"};
+    const std::vector<std::string> GSAMPLER_2D_ARR  = {"sampler2DArray", "isampler2DArray", "usampler2DArray"};
+    const std::vector<std::string> GSAMPLER_3D      = {"sampler3D", "isampler3D", "usampler3D"};
+    const std::vector<std::string> GVEC4_TYPE       = {"vec4", "ivec4", "uvec4"}; // Return types matching sampler
 
-        // 2. Resolve Argument Types
-        std::vector<TypePtr> params;
-        for (const std::string& argRaw : f.argTypes) {
-            std::string argName = argRaw;
-            if (!genericReplacement.empty()) {
-                 if (argName == "vec_type" || argName == "gentype") argName = genericReplacement;
-            }
-            params.push_back(typeRegistry.getType(argName));
-        }
+    // Matrix Expansion
+    const std::vector<std::string> MAT_TYPE = {"mat2", "mat3", "mat4"};
 
-        // 3. Create and Add Symbol
-        // We use line -1 for builtins
-        Symbol s{f.name, returnType, params, SymbolType::Builtin, -1, 0, f.doc};
-        
-        // We don't check for redefinitions here because overloads are allowed for functions
-        symbols.add(s); 
+    // Helper: Expands "vec_type" -> "vec3", "vec_int_type" -> "ivec3" based on index
+    auto resolveGeneric = [&](const std::string& generic, int idx) -> std::string {
+        if (generic == "vec_type") return VEC_TYPE[idx];
+        if (generic == "vec_int_type") return VEC_INT_TYPE[idx];
+        if (generic == "vec_uint_type") return VEC_UINT_TYPE[idx];
+        if (generic == "vec_bool_type") return VEC_BOOL_TYPE[idx];
+        // gvec4_type is handled in the sampler loop usually, but if independent:
+        if (generic == "gvec4_type") return GVEC4_TYPE[std::min(idx, 2)]; 
+        return generic;
+    };
+
+    // Helper: Register a single concrete function
+    auto registerConcrete = [&](const std::string& name, const std::string& ret, const std::vector<std::string>& args, const std::string& doc) {
+        TypePtr returnType = typeRegistry.getType(ret);
+        std::vector<TypePtr> argTypes;
+        for (const auto& a : args) argTypes.push_back(typeRegistry.getType(a));
+        Symbol s{name, returnType, argTypes, SymbolType::Builtin, -1, 0, doc};
+        symbols.add(s);
     };
 
     for (const auto& func : GLOBAL_FUNCTIONS) {
         
-        bool isGeneric = false;
-        if (func.returnType == "vec_type" || func.returnType == "gentype") isGeneric = true;
-        for(const auto& arg : func.argTypes) {
-            if (arg == "vec_type" || arg == "gentype") isGeneric = true;
-        }
+        bool isVectorGeneric = false;
+        bool isSamplerGeneric = false;
+        bool isMatrixGeneric = false;
 
-        if (isGeneric) {
-            // Expand Generics: Register for float, vec2, vec3, vec4
-            // (You can add int/ivec/uint expansion here too if needed)
-            registerVariant(func, "float");
-            registerVariant(func, "vec2");
-            registerVariant(func, "vec3");
-            registerVariant(func, "vec4");
-        } else {
-            // Register exactly as defined (e.g. texture(sampler2D, vec2))
-            registerVariant(func);
+        for (const auto& t : func.argTypes) {
+            if (t.find("vec_") == 0) isVectorGeneric = true;
+            if (t.find("gsampler") == 0) isSamplerGeneric = true;
+            if (t == "mat_type") isMatrixGeneric = true;
+        }
+        if (func.returnType.find("vec_") == 0) isVectorGeneric = true;
+        if (func.returnType == "mat_type") isMatrixGeneric = true;
+
+        if (isVectorGeneric) {
+            // Expand 4 times (Scalar, Vec2, Vec3, Vec4)
+            for (int i = 0; i < 4; i++) {
+                std::string r = resolveGeneric(func.returnType, i);
+                std::vector<std::string> a;
+                for(const auto& arg : func.argTypes) a.push_back(resolveGeneric(arg, i));
+                registerConcrete(func.name, r, a, func.doc);
+            }
+        }
+        else if (isSamplerGeneric) {
+            // Expand 3 times (Float, Int, Uint samplers)
+            for (int i = 0; i < 3; i++) {
+                std::string r = func.returnType;
+                if (r == "gvec4_type") r = GVEC4_TYPE[i];
+
+                std::vector<std::string> a;
+                for (const auto& arg : func.argTypes) {
+                    if (arg == "gsampler2D") a.push_back(GSAMPLER_2D[i]);
+                    else if (arg == "gsampler2DArray") a.push_back(GSAMPLER_2D_ARR[i]);
+                    else if (arg == "gsampler3D") a.push_back(GSAMPLER_3D[i]);
+                    else a.push_back(arg);
+                }
+                registerConcrete(func.name, r, a, func.doc);
+            }
+        }
+        else if (isMatrixGeneric) {
+            // Expand 3 times (mat2, mat3, mat4)
+            for (int i = 0; i < 3; i++) {
+                std::string r = (func.returnType == "mat_type") ? MAT_TYPE[i] : func.returnType;
+                std::vector<std::string> a;
+                for (const auto& arg : func.argTypes) {
+                    a.push_back((arg == "mat_type") ? MAT_TYPE[i] : arg);
+                }
+                registerConcrete(func.name, r, a, func.doc);
+            }
+        }
+        else {
+            // No generics, register as is
+            registerConcrete(func.name, func.returnType, func.argTypes, func.doc);
         }
     }
 }

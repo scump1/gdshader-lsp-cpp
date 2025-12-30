@@ -78,8 +78,9 @@ private:
     bool allPathsReturn(const ASTNode* node);
 
     TypePtr getBinaryOpResultType(TypePtr l, TypePtr r, TokenType op);
-
-    const Symbol* getRootSymbol(const ExpressionNode* node, const SymbolTable& symbols);
+    const Symbol* findBestOverload(const FunctionCallNode* node, const std::vector<TypePtr>& argTypes);
+    int getConversionCost(TypePtr from, TypePtr to);
+    const Symbol* getRootSymbol(const ExpressionNode* node, const SymbolTable& symbols);    
 
     void reportError(const ASTNode* node, const std::string& msg);
     void loadBuiltinsForFunction(const std::string& funcName);

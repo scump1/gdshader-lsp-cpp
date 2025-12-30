@@ -3,6 +3,17 @@
 
 namespace gdshader_lsp {
 
+namespace { // Anonymous namespace for local helper
+    bool signaturesMatch(const std::vector<TypePtr>& a, const std::vector<TypePtr>& b) {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i) {
+            // Dereference pointers to compare the actual Type objects
+            if (*a[i] != *b[i]) return false;
+        }
+        return true;
+    }
+}
+
 SymbolTable::SymbolTable() {
     root = std::make_unique<Scope>(nullptr);
     current = root.get();
@@ -29,19 +40,23 @@ bool SymbolTable::add(const Symbol& symbol)
 {
     auto& store = current->symbols[symbol.name];
     
-    if (!store.empty()) {
+    if (!store.empty()) 
+    {
         // A symbol with this name exists. 
         
-        // Rule 1: If the new symbol OR existing symbol is NOT a function, it's a collision.
-        // (e.g. "float x;" and "void x() {}" cannot coexist, nor can "float x;" and "float x;")
-        if (symbol.category != SymbolType::Function || store[0].category != SymbolType::Function) {
+        bool isFunc = (symbol.category == SymbolType::Function || symbol.category == SymbolType::Builtin);
+        bool existingIsFunc = (store[0].category == SymbolType::Function || store[0].category == SymbolType::Builtin);
+
+        // Rule 1: Collision Check
+        // If either is NOT a function/builtin, it's a variable collision.
+        if (!isFunc || !existingIsFunc) {
             return false; // Redefinition Error
         }
 
         // Rule 2: Function Overloading
         // We must check if a function with the SAME signature already exists.
         for (const auto& existing : store) {
-            if (existing.parameterTypes == symbol.parameterTypes) {
+            if (signaturesMatch(existing.parameterTypes, symbol.parameterTypes)) {
                 return false; // Exact signature redefinition Error
             }
         }

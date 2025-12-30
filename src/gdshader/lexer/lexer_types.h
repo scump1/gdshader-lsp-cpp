@@ -24,6 +24,11 @@ enum class TokenType {
     TOKEN_STAR,         // *
     TOKEN_SLASH,        // /
     TOKEN_PERCENT,      // %
+    TOKEN_PLUS_EQUAL,   // +=
+    TOKEN_MINUS_EQUAL,  // -=
+    TOKEN_STAR_EQUAL,   // *=
+    TOKEN_SLASH_EQUAL,  // /=
+    TOKEN_PERCENT_EQUAL,// %=
     TOKEN_EQUAL,        // =
     TOKEN_EQ_EQ,        // ==
     TOKEN_NOT_EQ,       // !=
@@ -33,6 +38,10 @@ enum class TokenType {
     TOKEN_GREATER_EQ,   // >=
     TOKEN_AND,          // &&
     TOKEN_OR,           // ||
+    TOKEN_AMPERSAND,    // &
+    TOKEN_PIPE,         // |
+    TOKEN_CARET,        // ^
+    TOKEN_TILDE,        // ~
     
     TOKEN_DOT,          // .
     TOKEN_COMMA,        // ,

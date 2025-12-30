@@ -233,12 +233,6 @@ Token Lexer::createToken() {
         advance();
         return {TokenType::TOKEN_DOT, ".", startLine, startCol};
     }
-    
-    // Handle Modulo (%)
-    if (current == '%') {
-        advance();
-        return {TokenType::TOKEN_PERCENT, "%", startLine, startCol};
-    }
 
     if (isdigit(current)) {
         return parseNumber(startLine, startCol);
@@ -251,12 +245,85 @@ Token Lexer::createToken() {
         return parseString(startLine, startCol);
     }
 
+    if (current == '+') { 
+        if (peek() == '=') { advance(); advance(); return {TokenType::TOKEN_PLUS_EQUAL, "+=", startLine, startCol}; }
+        advance(); return {TokenType::TOKEN_PLUS, "+", startLine, startCol}; 
+    }
+    if (current == '-') { 
+        if (peek() == '=') { advance(); advance(); return {TokenType::TOKEN_MINUS_EQUAL, "-=", startLine, startCol}; }
+        advance(); return {TokenType::TOKEN_MINUS, "-", startLine, startCol}; 
+    }
+    if (current == '*') { 
+        if (peek() == '=') { advance(); advance(); return {TokenType::TOKEN_STAR_EQUAL, "*=", startLine, startCol}; }
+        advance(); return {TokenType::TOKEN_STAR, "*", startLine, startCol}; 
+    }
+    if (current == '/') { 
+        if (peek() == '=') { advance(); advance(); return {TokenType::TOKEN_SLASH_EQUAL, "/=", startLine, startCol}; }
+        advance(); return {TokenType::TOKEN_SLASH, "/", startLine, startCol}; 
+    }
+    if (current == '%') { 
+        if (peek() == '=') { advance(); advance(); return {TokenType::TOKEN_PERCENT_EQUAL, "%=", startLine, startCol}; }
+        advance(); return {TokenType::TOKEN_PERCENT, "%", startLine, startCol}; 
+    }
+
+    if (current == '&') { 
+        if (peek() == '&') { 
+            advance(); advance(); 
+            return {TokenType::TOKEN_AND, "&&", startLine, startCol}; 
+        }
+        advance(); 
+        return {TokenType::TOKEN_AMPERSAND, "&", startLine, startCol}; 
+    }
+
+    if (current == '|') { 
+        if (peek() == '|') { 
+            advance(); advance(); 
+            return {TokenType::TOKEN_OR, "||", startLine, startCol}; 
+        }
+        advance(); 
+        return {TokenType::TOKEN_PIPE, "|", startLine, startCol}; 
+    }
+
+    if (current == '<') {
+        if (peek() == '=') {
+            advance(); advance();
+            return {TokenType::TOKEN_LESS_EQ, "<=", startLine, startCol};
+        }
+        advance();
+        return {TokenType::TOKEN_LESS, "<", startLine, startCol};
+    }
+
+    // Handle Greater Than (>) and Greater Equal (>=)
+    if (current == '>') {
+        if (peek() == '=') {
+            advance(); advance();
+            return {TokenType::TOKEN_GREATER_EQ, ">=", startLine, startCol};
+        }
+        advance();
+        return {TokenType::TOKEN_GREATER, ">", startLine, startCol};
+    }
+
+    // Handle Equal (=) and Equal Equal (==)
+    if (current == '=') {
+        if (peek() == '=') {
+            advance(); advance();
+            return {TokenType::TOKEN_EQ_EQ, "==", startLine, startCol};
+        }
+        advance();
+        return {TokenType::TOKEN_EQUAL, "=", startLine, startCol};
+    }
+
+    // Handle Not (!) and Not Equal (!=)
+    if (current == '!') {
+        if (peek() == '=') {
+            advance(); advance();
+            return {TokenType::TOKEN_NOT_EQ, "!=", startLine, startCol};
+        }
+        advance();
+        return {TokenType::TOKEN_EXCL, "!", startLine, startCol};
+    }
+
     // Handle single-character tokens.
-    if (current == '+') { advance(); return {TokenType::TOKEN_PLUS, "+", startLine, startCol}; }
-    if (current == '-') { advance(); return {TokenType::TOKEN_MINUS, "-", startLine, startCol}; }
-    if (current == '*') { advance(); return {TokenType::TOKEN_STAR, "*", startLine, startCol}; }
-    if (current == '/') { advance(); return {TokenType::TOKEN_SLASH, "/", startLine, startCol}; }
-    if (current == '=') { advance(); return {TokenType::TOKEN_EQUAL, "=", startLine, startCol}; }
     if (current == ':') { advance(); return {TokenType::TOKEN_COLON, ":", startLine, startCol}; }
     if (current == ';') { advance(); return {TokenType::TOKEN_SEMI, ";", startLine, startCol}; }
     if (current == '(') { advance(); return {TokenType::TOKEN_LPAREN, "(", startLine, startCol}; }
@@ -266,13 +333,7 @@ Token Lexer::createToken() {
     if (current == '[') { advance(); return {TokenType::TOKEN_LBRACKET, "[", startLine, startCol}; }
     if (current == ']') { advance(); return {TokenType::TOKEN_RBRACKET, "]", startLine, startCol}; }
     if (current == ',') { advance(); return {TokenType::TOKEN_COMMA, ",", startLine, startCol}; }
-    if (current == '!') { advance(); return {TokenType::TOKEN_EXCL, "!", startLine, startCol}; }
     if (current == '?') { advance(); return {TokenType::TOKEN_QUESTION, "?", startLine, startCol}; }
-
-    if (current == '<') { advance(); return {TokenType::TOKEN_LESS, "<", startLine, startCol}; }
-    if (current == '>') { advance(); return {TokenType::TOKEN_GREATER, ">", startLine, startCol}; }
-    if (current == '&') { advance(); return {TokenType::TOKEN_AND, "&", startLine, startCol}; }
-    if (current == '|') { advance(); return {TokenType::TOKEN_OR, "|", startLine, startCol}; }
 
     // Fallback
     advance();

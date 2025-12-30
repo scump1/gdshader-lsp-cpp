@@ -62,14 +62,14 @@ private:
             return t;
         };
 
+        add("void", TypeKind::SCALAR);
+
         auto floatT = add("float", TypeKind::SCALAR);
         auto intT   = add("int", TypeKind::SCALAR);
         auto uintT   = add("uint", TypeKind::SCALAR);
         auto boolT = add("bool", TypeKind::SCALAR);
 
-        add("void", TypeKind::SCALAR);
-
-        add("vec2", TypeKind::VECTOR, 2, floatT);
+        auto vec2T = add("vec2", TypeKind::VECTOR, 2, floatT);
         auto vec3T = add("vec3", TypeKind::VECTOR, 3, floatT);
         auto vec4T = add("vec4", TypeKind::VECTOR, 4, floatT);
 
@@ -85,10 +85,20 @@ private:
         add("bvec3", TypeKind::VECTOR, 3, boolT);
         add("bvec4", TypeKind::VECTOR, 4, boolT);
 
+        add("mat2", TypeKind::MATRIX, 2, vec2T);
         add("mat3", TypeKind::MATRIX, 3, vec3T);
         add("mat4", TypeKind::MATRIX, 4, vec4T);
 
         add("sampler2D", TypeKind::SAMPLER);
+        add("isampler2D", TypeKind::SAMPLER);
+        add("usampler2D", TypeKind::SAMPLER);
+
+        add("sampler3D", TypeKind::SAMPLER);
+        add("isampler3D", TypeKind::SAMPLER);
+        add("usampler3D", TypeKind::SAMPLER);
+
+        add("samplerCube", TypeKind::SAMPLER);
+        add("samplerCubeArray", TypeKind::SAMPLER);
     }
 
 public:
@@ -131,7 +141,8 @@ public:
 
     TypePtr getUnknownType() const { return unknownType; }
 
-    TypePtr getArrayType(TypePtr base, int size) {
+    TypePtr getArrayType(TypePtr base, int size) 
+    {
         // Construct a unique name for caching: "float[5]"
         std::string key = base->name + "[" + std::to_string(size) + "]";
         if (types.count(key)) return types[key];
