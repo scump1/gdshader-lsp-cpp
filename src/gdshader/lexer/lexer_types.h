@@ -128,16 +128,6 @@ enum class TokenType {
     KEYWORD_FALSE
 };
 
-// Helper for debug printing (Optional but recommended)
-inline std::string tokenTypeToString(TokenType t) {
-    switch(t) {
-        case TokenType::TOKEN_EOF: return "EOF";
-        case TokenType::TOKEN_IDENTIFIER: return "IDENTIFIER";
-        // ... add others as needed for your debug logs
-        default: return "TOKEN";
-    }
-}
-
 struct Token {
     TokenType type;
     std::string value;

@@ -31,7 +31,7 @@ void GdShaderServer::run()
 void GdShaderServer::registerHandlers() {
     
     // --- LIFECYCLE: INITIALIZE ---
-    // The client sending its capabilities and asking for yours.
+    // The client sending its capabilities.
     handler.add<lsp::requests::Initialize>(
         [this](lsp::requests::Initialize::Params&& params) {
             
@@ -122,7 +122,7 @@ void GdShaderServer::registerHandlers() {
 
             if (isMember) {
                 // 1. Find the base variable (e.g. "my_instance" from "my_instance.test")
-                std::string baseName = getWordBeforeDot(su->source_code, col); // You need to implement/expose this helper
+                std::string baseName = getWordBeforeDot(su->source_code, col);
                 // 2. Look up base
                 const Symbol* baseSym = su->symbols->lookupAt(baseName, line);
                 if (baseSym && baseSym->type) {
@@ -651,7 +651,6 @@ lsp::DocumentSymbol GdShaderServer::createSymbol(const std::string& name, lsp::S
     sym.detail = detail;
 
     // Range: For now, we select the whole line. 
-    // Ideally, you'd add 'endLine' to your ASTNodes for precise block ranges.
     sym.range = lsp::Range{
         .start = lsp::Position{(unsigned)line, 0},
         .end = lsp::Position{(unsigned)line, 0}
@@ -725,7 +724,6 @@ std::vector<lsp::DocumentSymbol> GdShaderServer::getDocumentSymbols(const ASTNod
     }
 
     // Note: We intentionally skip If/While/For nodes here to keep the Outline clean.
-    // If you want to show variables declared inside 'if' blocks, add handlers for them here.
 
     return symbols;
 }

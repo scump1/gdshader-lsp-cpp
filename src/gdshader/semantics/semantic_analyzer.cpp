@@ -316,8 +316,11 @@ void gdshader_lsp::SemanticAnalyzer::visitInclude(const IncludeNode *node)
     
     for (const auto& [name, overloadList] : globals) {
         for (const auto& sym : overloadList) {
-            // Check for collisions in current file?
-            // Usually, includes act like copy-paste, so redefinition errors are valid.
+
+            if (sym.category == SymbolType::Builtin) {
+                continue; // We only are interested in the user defined stuff here, builtins are target-end-file specific
+            }
+
             if (!symbols.add(sym)) {
                 reportError(node, "Symbol '" + name + "' imported from " + node->path + " conflicts with existing symbol.");
             }
@@ -881,8 +884,6 @@ void SemanticAnalyzer::validateConstructor(const FunctionCallNode* node, const s
             TypePtr argType = resolveType(node->arguments[i].get());
             TypePtr expectedType = target->members[i].second;
 
-            // Strict Type Check (Structs don't usually allow implicit casting in constructors)
-            // This works for Arrays too because of your Type::operator==
             if (*argType != *expectedType) {
                 reportError(node->arguments[i].get(), 
                     "Type mismatch in struct constructor argument " + std::to_string(i+1) + 
