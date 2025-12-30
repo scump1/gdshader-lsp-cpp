@@ -200,9 +200,6 @@ void GdShaderServer::registerHandlers() {
                 return result;
             }
 
-            // --- CASE B: GLOBAL COMPLETION ---
-            // List all visible variables and functions
-            
             std::vector<Symbol> visible = doc.symbols.getVisibleSymbolsAt(line);
             
             for (const auto& s : visible) {
@@ -302,14 +299,23 @@ void gdshader_lsp::GdShaderServer::compileAndPublish(const lsp::DocumentUri& uri
     // 3. Convert Diagnostics
     std::vector<lsp::Diagnostic> lspDiagnostics;
     for (const auto& err : errors) {
-        int line_length = getLine(doc.text, err.line).length();
+
+        int len = (err.length > 0) ? err.length : 1;
+
+        lsp::DiagnosticSeverity severity;
+        if (err.level == DiagnosticLevel::Warning) {
+            severity = lsp::DiagnosticSeverity::Warning;
+        } else {
+            severity = lsp::DiagnosticSeverity::Error;
+        }
+
         lspDiagnostics.push_back(lsp::Diagnostic{
             .range = lsp::Range{
-                .start = lsp::Position{(unsigned)err.line, (unsigned)0},
-                .end   = lsp::Position{(unsigned)err.line, (unsigned)line_length}
+                .start = lsp::Position{(unsigned)err.line, (unsigned)err.column},
+                .end   = lsp::Position{(unsigned)err.line, (unsigned)(err.column + len)}
             },
             .message = err.message,
-            .severity = lsp::DiagnosticSeverity::Error,
+            .severity = severity,
             .source = "gdshader"
         });
     }

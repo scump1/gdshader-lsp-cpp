@@ -69,7 +69,36 @@ void SemanticAnalyzer::visitUniform(const UniformNode* node)
         } 
         else if (hintName == "hint_range") {
             // Valid for: int, float
-            valid = (type->name == "int" || type->name == "float");
+            size_t start = node->hint.find('(');
+            size_t end = node->hint.find(')');
+            
+            if (start != std::string::npos && end != std::string::npos) {
+                std::string args = node->hint.substr(start + 1, end - start - 1);
+                
+                // Simple comma splitting
+                std::vector<std::string> parts;
+                std::string current;
+                for(char c : args) {
+                    if (c == ',') { parts.push_back(current); current=""; }
+                    else current += c;
+                }
+                parts.push_back(current);
+
+                if (parts.size() < 2 || parts.size() > 3) {
+                     reportError(node, "Invalid hint_range arguments. Expected (min, max) or (min, max, step).");
+                } else {
+                    // Try to parse values (basic check)
+                    try {
+                        float minVal = std::stof(parts[0]);
+                        float maxVal = std::stof(parts[1]);
+                        if (minVal >= maxVal) {
+                            reportWarning(node, "hint_range min value (" + parts[0] + ") is >= max value (" + parts[1] + ").");
+                        }
+                    } catch (...) {
+                        // Parsing failed (maybe expressions used), ignore for now
+                    }
+                }
+            }
         }
         else if (hintName == "hint_normal" || 
                  hintName == "hint_default_white" || 
@@ -273,8 +302,23 @@ void SemanticAnalyzer::visitProgram(const ProgramNode* node)
 void SemanticAnalyzer::visitBlock(const BlockNode* node) 
 {
     symbols.pushScope(node->line);
+    bool unreachable = false;
     for (const auto& stmt : node->statements) {
+        if (unreachable) {
+            reportWarning(stmt.get(), "Unreachable code detected.");
+            // Only report once per block to avoid spam
+            break; 
+        }
+
         visit(stmt.get());
+
+        // Check if this statement terminates control flow
+        if (dynamic_cast<const ReturnNode*>(stmt.get()) || 
+            dynamic_cast<const DiscardNode*>(stmt.get()) ||
+            dynamic_cast<const BreakNode*>(stmt.get()) ||
+            dynamic_cast<const ContinueNode*>(stmt.get())) {
+            unreachable = true;
+        }
     }
     symbols.popScope(node->endLine);
 }
@@ -285,8 +329,21 @@ void SemanticAnalyzer::visitVarDecl(const VariableDeclNode* node)
 
     if (type->kind == TypeKind::UNKNOWN) reportError(node, "Unknown type '" + node->type + "'");
 
-    Symbol s{node->name, type, {type}, SymbolType::Variable, node->line, node->column, ""};
-    if (!symbols.add(s)) reportError(node, "Redefinition of variable '" + s.name + "'");
+    if (symbols.lookup(node->name)) {
+        // If it exists, but add() succeeds, it means it wasn't in the *current* immediate scope
+        // (because add() checks strict redefinition). Therefore, it must be shadowing.
+        // We defer the warning until we know add() succeeds.
+        
+        Symbol s{node->name, type, {type}, SymbolType::Variable, node->line, node->column, ""};
+        if (symbols.add(s)) {
+            reportWarning(node, "Variable '" + node->name + "' shadows an existing declaration.");
+        } else {
+            reportError(node, "Redefinition of variable '" + node->name + "' in the same scope.");
+        }
+    } else {
+        Symbol s{node->name, type, {type}, SymbolType::Variable, node->line, node->column, ""};
+        symbols.add(s);
+    }
     
     if (node->initializer) {
         visit(node->initializer.get());
@@ -294,8 +351,7 @@ void SemanticAnalyzer::visitVarDecl(const VariableDeclNode* node)
         
         // Smart Comparison using TypePtr
         if (initType->kind != TypeKind::UNKNOWN && *initType != *type) {
-            reportError(node, "Type mismatch: Cannot initialize '" + type->toString() + 
-                "' with '" + initType->toString() + "'");
+            reportTypeMismatch(node, type->toString(), initType->toString());
         }
     }
 }
@@ -619,12 +675,56 @@ void SemanticAnalyzer::visitFunctionCall(const FunctionCallNode* node)
     const Symbol* bestMatch = findBestOverload(node, argTypes);
     
     if (!bestMatch) {
-        // Construct a helpful error message
-        std::string argsStr = "";
-        for(auto& t : argTypes) argsStr += t->toString() + ", ";
-        if (!argsStr.empty()) { argsStr.pop_back(); argsStr.pop_back(); } 
+        // IMPROVED ERROR REPORTING
         
-        reportError(node, "No matching function for '" + name + "(" + argsStr + ")'. Candidates found: " + std::to_string(candidates.size()));
+        // 1. Check if any candidate has the correct argument count
+        std::vector<const Symbol*> arityMatches;
+        for (const auto* s : candidates) {
+            if (s->parameterTypes.size() == argTypes.size()) {
+                arityMatches.push_back(s);
+            }
+        }
+
+        if (arityMatches.empty()) {
+            // Case: Wrong number of arguments
+            // Just grab the first candidate to show expected count (usually sufficient for simple functions)
+            size_t expected = candidates[0]->parameterTypes.size();
+            reportError(node, "Invalid argument count for '" + name + "'. Expected " + 
+                        std::to_string(expected) + ", but got " + std::to_string(argTypes.size()) + ".");
+        } 
+        else {
+            // Case: Correct arg count, but wrong types.
+            // We need to find the "closest" match to report the most relevant error.
+            
+            const Symbol* closest = arityMatches[0];
+            int maxMatches = -1;
+
+            for (const auto* cand : arityMatches) {
+                int matches = 0;
+                for(size_t i=0; i < argTypes.size(); ++i) {
+                    if (getConversionCost(argTypes[i], cand->parameterTypes[i]) != -1) {
+                        matches++;
+                    }
+                }
+                if (matches > maxMatches) {
+                    maxMatches = matches;
+                    closest = cand;
+                }
+            }
+
+            // Now report the specific mismatch in the closest candidate
+            for (size_t i = 0; i < argTypes.size(); ++i) {
+                TypePtr expected = closest->parameterTypes[i];
+                TypePtr actual = argTypes[i];
+                
+                if (getConversionCost(actual, expected) == -1) {
+                    reportError(node->arguments[i].get(), 
+                    "Invalid argument " + std::to_string(i + 1) + " for function '" + name + "'. Expected '" + 
+                    expected->toString() + "', but found '" + actual->toString() + "'.");
+                    break; 
+                }
+            }
+        }
     }
 }
 
@@ -642,6 +742,61 @@ void SemanticAnalyzer::visitMemberAccess(const MemberAccessNode* node)
 
     TypePtr memberT = typeRegistry.getMemberType(baseT, node->member);
     if (memberT->kind == TypeKind::UNKNOWN) {
+        
+        if (baseT->kind == TypeKind::VECTOR) {
+            std::string swizzle = node->member;
+            
+            // Check 1: Length
+            if (swizzle.length() > 4) {
+                reportError(node, "Swizzle '" + swizzle + "' is too long (max 4 components).");
+                return;
+            }
+
+            // Check 2: Component Validity for this vector size
+            const std::string sets[] = {"xyzw", "rgba", "stpq"};
+            int validSetIndex = -1;
+
+            for (int i = 0; i < 3; i++) {
+                bool partOfSet = true;
+                for (char c : swizzle) {
+                    if (sets[i].find(c) == std::string::npos) {
+                        partOfSet = false;
+                        break;
+                    }
+                }
+                if (partOfSet) {
+                    validSetIndex = i;
+                    break;
+                }
+            }
+
+            if (validSetIndex == -1) {
+                // Check for mixed sets (e.g. "xg")
+                bool hasXYZW = false, hasRGBA = false;
+                for (char c : swizzle) {
+                    if (std::string("xyzw").find(c) != std::string::npos) hasXYZW = true;
+                    if (std::string("rgba").find(c) != std::string::npos) hasRGBA = true;
+                }
+                if (hasXYZW && hasRGBA) {
+                    reportError(node, "Illegal swizzle '" + swizzle + "'. Cannot mix xyzw and rgba sets.");
+                } else {
+                    reportError(node, "Invalid swizzle component in '" + swizzle + "'.");
+                }
+                return;
+            }
+
+            // Check 3: Bounds (e.g. vec2.z)
+            // validSetIndex is 0(xyzw), 1(rgba), or 2(stpq)
+            std::string currentSet = sets[validSetIndex];
+            for (char c : swizzle) {
+                size_t componentIndex = currentSet.find(c);
+                if (componentIndex >= (size_t)baseT->componentCount) {
+                    reportError(node, "Swizzle component '" + std::string(1, c) + "' is out of bounds for " + baseT->toString() + ".");
+                    return;
+                }
+            }
+        }
+        
         reportError(node, "Invalid member '" + node->member + "' on type '" + baseT->toString() + "'");
     }
 }
@@ -901,6 +1056,47 @@ const Symbol *gdshader_lsp::SemanticAnalyzer::getRootSymbol(const ExpressionNode
     return nullptr;
 }
 
+int SemanticAnalyzer::getNodeLength(const ASTNode* node) {
+    if (!node) return 1;
+
+    // 1. Identifiers (e.g. "my_var")
+    if (auto n = dynamic_cast<const IdentifierNode*>(node)) {
+        return n->name.length();
+    }
+    // 2. Function Calls (e.g. "max(...)") - highlights "max"
+    if (auto n = dynamic_cast<const FunctionCallNode*>(node)) {
+        return n->functionName.length();
+    }
+    // 3. Literals (e.g. "1.0", "true")
+    if (auto n = dynamic_cast<const LiteralNode*>(node)) {
+        return n->value.length();
+    }
+    // 4. Types / Variables (e.g. "vec3")
+    if (auto n = dynamic_cast<const VariableDeclNode*>(node)) {
+        // Usually points to the type start
+        return n->type.length(); 
+    }
+    // 5. Member Access (e.g. ".x") - Parser usually sets loc to the dot
+    if (auto n = dynamic_cast<const MemberAccessNode*>(node)) {
+        return 1 + n->member.length(); // ".member"
+    }
+    // 6. Binary Ops (highlight the operator, e.g. +=)
+    if (auto n = dynamic_cast<const BinaryOpNode*>(node)) {
+        TokenType t = n->op;
+        if (t == TokenType::TOKEN_PLUS_EQUAL || t == TokenType::TOKEN_MINUS_EQUAL || 
+            t == TokenType::TOKEN_STAR_EQUAL || t == TokenType::TOKEN_SLASH_EQUAL ||
+            t == TokenType::TOKEN_EQ_EQ || t == TokenType::TOKEN_NOT_EQ ||
+            t == TokenType::TOKEN_LESS_EQ || t == TokenType::TOKEN_GREATER_EQ ||
+            t == TokenType::TOKEN_AND || t == TokenType::TOKEN_OR) {
+            return 2; 
+        }
+        return 1; // +, -, *, /
+    }
+
+    // Fallback
+    return 1;
+}
+
 void SemanticAnalyzer::loadBuiltinsForFunction(const std::string& funcName) 
 {
     ShaderStage scope = ShaderStage::Global;
@@ -996,7 +1192,21 @@ TypePtr gdshader_lsp::SemanticAnalyzer::resolveType(const ExpressionNode *node)
 }
 
 void SemanticAnalyzer::reportError(const ASTNode* node, const std::string& msg) {
-    if (node) diagnostics.push_back({node->line, node->column, msg});
+    if (node) {
+        int len = getNodeLength(node);
+        diagnostics.push_back({node->line, node->column, msg, DiagnosticLevel::Error, len});
+    }
+}
+
+void SemanticAnalyzer::reportWarning(const ASTNode* node, const std::string& msg) {
+    if (node) {
+        int len = getNodeLength(node);
+        diagnostics.push_back({node->line, node->column, msg, DiagnosticLevel::Warning, len});
+    }
+}
+
+void SemanticAnalyzer::reportTypeMismatch(const ASTNode* node, const std::string& expected, const std::string& found) {
+    reportError(node, "Type mismatch: Expected '" + expected + "', but found '" + found + "'.");
 }
 
 void SemanticAnalyzer::registerGlobalFunctions()

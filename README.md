@@ -6,30 +6,11 @@ This tool provides advanced code intelligence, strict type checking, and real-ti
 
 ## Features
 
-### Semantic Analysis & Type Safety
-Unlike basic syntax highlighters, this LSP understands the *meaning* of your code.
-* **Strict Type Checking**: Catches errors like `float x = 5;` (implicit cast) or `vec3 * int` mismatches immediately.
-* **Validation**:
-    * **Swizzling**: Ensures components exist (`vec2.z` → error) and sets aren't mixed (`.xg` → error).
-    * **Structs**: Validates member access and constructor arguments (order & type).
-    * **Constructors**: Enforces strict GLSL/Godot constructor rules (e.g., `vec3(1.0, 2.0)` vs `vec3(1, 2)`).
-    * **Functions**: Checks argument counts and types against signatures for both **Built-ins** (`pow`, `texture`) and **User-defined** functions.
-* **Godot-Specific Rules**:
-    * Validates processor signatures (`void vertex()`, `void fragment()`).
-    * Enforces `discard` keyword usage (Fragment processor only).
-    * Restricts `varying` assignments (Vertex/Fragment only, never in Light processor).
-    * Validates Uniform Hints (e.g., checks if `hint_range` is used on a `float/int`).
+This LSP is feature complete. It handles all requests like any other full-featured language server. From autocompletion to hover, go-to definitions and even syntax highliting. 
 
-### LSP Capabilities
-* **Auto-Completion**:
-    * Smart suggestions for variables in scope.
-    * Struct members and Vector swizzling (e.g., typing `my_vec.` suggests `xy`, `rgb`).
-    * Built-in functions and types.
-* **Go to Definition**: Jump instantly to where variables, structs, or functions are defined.
-* **Hover Documentation**:
-    * Shows types and function signatures (e.g., `vec3 mix(vec3, vec3, float)`).
-    * Displays documentation for built-in Godot functions.
-    * Shows values of `const` variables.
+### Dev Insights
+
+We are not using a standalone memory allocation system (like an arena allocator). Shader files tend to be rather short, mostly under 1000 lines. The cpp built-in allocs are perfectly capable of handling these scenarios. In stress test, even with files around 5000 lines, many preprocessors and includes, compiling with many errors, we never exceeded the 25ms mark on the full pipeline from client -> server -> client.
 
 ---
 
@@ -46,3 +27,6 @@ To build the standalone LSP executable:
 
 ```bash
 scons platform=<platform>
+```
+
+Where platform = [linux, windos, macos].

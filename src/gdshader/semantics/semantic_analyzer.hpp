@@ -81,8 +81,12 @@ private:
     const Symbol* findBestOverload(const FunctionCallNode* node, const std::vector<TypePtr>& argTypes);
     int getConversionCost(TypePtr from, TypePtr to);
     const Symbol* getRootSymbol(const ExpressionNode* node, const SymbolTable& symbols);    
+    int getNodeLength(const ASTNode* node);
 
     void reportError(const ASTNode* node, const std::string& msg);
+    void reportWarning(const ASTNode* node, const std::string& msg);
+    void reportTypeMismatch(const ASTNode* node, const std::string& expected, const std::string& found);
+
     void loadBuiltinsForFunction(const std::string& funcName);
     TypePtr resolveType(const ExpressionNode* node);
 
